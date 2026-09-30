@@ -9,16 +9,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import config, data, greeks, ta
+from . import config, data, greeks, structure, ta
 
 WEIGHTS = {
-    "trend": 30,  # strength of the underlying's move in the contract's direction
-    "liquidity": 20,  # tight spread and real open interest
+    "trend": 30,  # strength of the composite market read in the contract's direction
+    "liquidity": 15,  # tight spread and real open interest
     "breakeven": 15,  # move needed to break even vs the move the market expects
     "iv_value": 15,  # implied vol relative to recent realised vol
+    "gamma": 10,  # negative dealer gamma and room before the wall
     "theta": 10,  # share of the premium lost per day
-    "delta": 10,  # closeness to the target delta
+    "delta": 5,  # closeness to the target delta
 }
+
+GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
+FULL_CONVICTION = 70  # composite score that earns all of the direction points
 
 COLUMNS = [
     "ticker", "type", "strike", "expiration", "dte", "score", "cost", "mid", "bid", "ask",
@@ -34,12 +38,43 @@ def _scale(x, best, worst):
     return np.clip((np.asarray(x, dtype=float) - worst) / (best - worst), 0.0, 1.0)
 
 
+def _read_structure(ticker: str, ind: pd.DataFrame, snap: dict, spot: float, rate: float) -> dict:
+    """Run every method; one that lacks data or fails returns None and is left out."""
+    def attempt(read):
+        try:
+            return read()
+        except Exception:
+            return None
+
+    atr = float(ind["atr"].iloc[-1])
+    return {
+        "auction": attempt(lambda: structure.auction(data.intraday(ticker), atr)),
+        "gamma": attempt(lambda: structure.gamma(data.open_interest(ticker, GAMMA_MAX_DTE), spot, rate)),
+        "wyckoff": attempt(lambda: structure.wyckoff(ind)),
+        "vpa": attempt(lambda: structure.vpa(ind)),
+        "trend": {"score": snap["trend"], "reasons": snap["reasons"]},
+    }
+
+
 def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]:
     ind = ta.add_indicators(data.history(ticker))
     snap = ta.snapshot(ind)
     spot = data.spot_price(ticker, snap["close"])
-    direction = ta.bias(snap["trend"], cfg["min_trend_strength"])
-    result = {"ticker": ticker, "spot": spot, "bias": direction, "indicators": ind, **snap}
+    reads = _read_structure(ticker, ind, snap, spot, rate)
+    score = structure.composite(reads)
+    direction = ta.bias(score, cfg["min_trend_strength"])
+    levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}
+    result = {
+        "ticker": ticker, "spot": spot, "bias": direction, "indicators": ind, **snap,
+        "trend": score, "levels": levels,
+        "methods": [
+            {"key": k, "name": structure.METHOD_NAMES[k], "score": p["score"], "reasons": p["reasons"]}
+            for k, p in reads.items() if p
+        ],
+        "reasons": [
+            f"{r[0]} {structure.METHOD_NAMES[k]}: {r[2:]}" for k, p in reads.items() if p for r in p["reasons"]
+        ],
+    }
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
     if direction == "neutral":
         return result
@@ -104,7 +139,8 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
 
     spread = _scale(df["spread_pct"].fillna(cfg["max_spread_pct"] / 2), 0, cfg["max_spread_pct"])
     parts = {
-        "trend": np.full(len(df), abs(snap["trend"]) / 100.0),
+        "trend": np.full(len(df), min(abs(score) / FULL_CONVICTION, 1.0)),
+        "gamma": structure.gamma_fit(reads["gamma"], is_call, df["breakeven"].to_numpy(), spot),
         "liquidity": 0.6 * spread + 0.4 * _scale(np.log10(df["openInterest"] + 1), 3.5, 1.5),
         "breakeven": _scale(df["breakeven_move"] / df["expected_move"], 0.4, 1.5),
         "iv_value": _scale(df["iv_hv"].fillna(1.25), 0.9, 1.6),
@@ -119,7 +155,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     df["earnings_before_expiry"] = (
         pd.to_datetime(df["expiration"]).dt.date >= earnings if earnings else False
     )
-    df["ticker"], df["spot"], df["trend"], df["bias"] = ticker, spot, snap["trend"], direction
+    df["ticker"], df["spot"], df["trend"], df["bias"] = ticker, spot, score, direction
     result["earnings"] = earnings
     result["contracts"] = df[COLUMNS].sort_values("score", ascending=False).reset_index(drop=True)
     return result

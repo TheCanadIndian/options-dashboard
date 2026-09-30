@@ -10,14 +10,16 @@ from typing import Any
 
 from . import portfolio
 from .config import HOME
-from .scanner import WEIGHTS
 
 OUT = HOME / "docs" / "index.html"
 
 FACTOR_LABELS = {
-    "trend": "Trend strength", "liquidity": "Liquidity", "breakeven": "Breakeven vs expected move",
-    "iv_value": "Option price vs volatility", "theta": "Low time decay", "delta": "Delta near target",
+    "trend": "Strength of the market read", "liquidity": "Liquidity", "breakeven": "Breakeven vs expected move",
+    "iv_value": "Option price vs volatility", "gamma": "Gamma backdrop", "theta": "Low time decay",
+    "delta": "Delta near target",
 }
+# Factor weights in force before the gamma factor existed; older positions do not store their own.
+LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15, "theta": 10, "delta": 10}
 
 CSS = """
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
@@ -164,19 +166,30 @@ def _chart(points: list[list], start_cash: float) -> str:
 
 
 def _reasoning(pos: dict[str, Any], opened: bool) -> str:
-    marks = {"+": "▲", "-": "▼", "!": "⚠"}
-    trend = "".join(f"<li>{marks[r[0]]} {escape(r[2:])}</li>" for r in pos["trend_reasons"])
+    marks = {"+": "▲", "-": "▼", "!": "⚠", "=": "•"}
+
+    def lines(reasons: list[str]) -> str:
+        return "".join(f"<li>{marks[r[0]]} {escape(r[2:])}</li>" for r in reasons)
+
+    if "methods" in pos:
+        read = "".join(
+            f'<h4>{escape(m["name"])}: {m["score"]:+.0f}</h4><ul class="plain">{lines(m["reasons"])}</ul>'
+            for m in pos["methods"]
+        )
+    else:  # positions opened before the market-structure methods were added
+        read = f'<ul class="plain">{lines(pos["trend_reasons"])}</ul>'
     notes = "".join(f"<li>{escape(n)}</li>" for n in pos["contract_notes"])
+    weights = pos.get("weights", LEGACY_WEIGHTS)
     rows = "".join(
         f'<div>{FACTOR_LABELS[k]}</div><div class="b"><span style="width:{pos["points"][k] / w * 100:.0f}%"></span></div>'
         f'<div class="n">{pos["points"][k]:.0f} / {w}</div>'
-        for k, w in WEIGHTS.items()
+        for k, w in weights.items()
     )
     side = "call" if pos["type"] == "call" else "put"
     return (
         f'<details{" open" if opened else ""}><summary>Why this trade</summary>'
-        f'<h4>The chart was {pos["bias"]} (trend score {pos["trend"]:+.0f}), so the scanner looked for a {side}</h4>'
-        f'<ul class="plain">{trend}</ul>'
+        f'<h4>The market read was {pos["bias"]} (score {pos["trend"]:+.0f} on a scale of -100 to +100), '
+        f'so the scanner looked for a {side}</h4>{read}'
         f'<h4>Why this contract</h4><ul>{notes}</ul>'
         f'<h4>Score {pos["score"]:.0f} out of 100</h4><div class="pts">{rows}</div>'
         f'<h4>Exit plan set at entry</h4><ul>'
@@ -268,6 +281,9 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
     )
     rules = [
         f"Starts with {_money(start, False)} in cash. Nothing here is real money.",
+        "Direction comes from a combined read of auction and market profile (value area, point of control), "
+        "gamma and delta exposure (GEX walls and flip level, DEX positioning), Wyckoff structure, volume price analysis, and trend. Bullish reads "
+        "look for calls, bearish reads for puts, and mixed reads are skipped.",
         f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
         f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
         f"{cfg['sim_max_positions']} positions, one per stock.",

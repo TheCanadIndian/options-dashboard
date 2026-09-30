@@ -8,6 +8,8 @@ from datetime import date, datetime
 import pandas as pd
 import yfinance as yf
 
+from .config import STATE_DIR
+
 # ETFs have no earnings calendar and yfinance logs a 404 for each; callers handle the None.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
@@ -17,6 +19,31 @@ def history(ticker: str, period: str = "2y") -> pd.DataFrame:
     if df.empty or len(df) < 60:
         raise ValueError(f"{ticker}: not enough price history")
     return df.dropna(subset=["Close"])
+
+
+def intraday(ticker: str) -> pd.DataFrame:
+    """A month of 30-minute regular-session bars, for the volume profile."""
+    df = yf.Ticker(ticker).history(period="1mo", interval="30m", auto_adjust=True, prepost=False)
+    return df.dropna(subset=["Close"])
+
+
+def open_interest(ticker: str, max_dte: int) -> pd.DataFrame:
+    """Open interest for every near-dated contract. It only changes overnight, so it is cached per day."""
+    path = STATE_DIR / "oi" / f"{ticker}.pkl"
+    today = date.today().isoformat()
+    if path.exists():
+        try:
+            cached = pd.read_pickle(path)
+            if cached["date"] == today:
+                return cached["chain"]
+        except Exception:
+            pass  # unreadable cache: refetch
+    chain = option_chain(ticker, 0, max_dte)
+    if not chain.empty:
+        chain = chain[["type", "strike", "expiration", "openInterest", "impliedVolatility"]]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.to_pickle({"date": today, "chain": chain}, path)
+    return chain
 
 
 def spot_price(ticker: str, fallback: float) -> float:

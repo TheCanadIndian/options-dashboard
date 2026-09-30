@@ -26,7 +26,7 @@ DEFAULTS: dict[str, Any] = {
     "min_open_interest": 100,
     "min_volume": 10,
     "max_spread_pct": 15.0,
-    "min_trend_strength": 30,  # |trend score| needed before a ticker gets a direction
+    "min_trend_strength": 25,  # |composite score| needed before a ticker gets a direction
     "fallback_risk_free_rate": 0.04,
     "alert_min_score": 70,
     "alert_cooldown_hours": 24,

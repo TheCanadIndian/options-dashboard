@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from options_dashboard import alerts, config, paper, scanner
+from options_dashboard import alerts, config, paper, scanner, structure
 
 # Chart colours (dark surface). Series hues are assigned in a fixed order.
 SURFACE, GRID, AXIS = "#1a1a19", "#2c2c2a", "#383835"
@@ -156,12 +156,36 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
             st.warning(f"Earnings on {info.get('earnings')} fall before expiry. Implied volatility usually drops sharply afterwards, which can hurt a long option even if the stock moves your way.", icon="⚠️")
         if pick["stale"]:
             st.info("No live bid/ask (market closed or no quote). Prices are from the last trade.", icon="ℹ️")
-    left, right = st.columns([3, 1])
+    left, right = st.columns([3, 2])
     left.plotly_chart(price_chart(info["indicators"], ticker), width="stretch")
+    left.caption(f"RSI {info['rsi']:.0f} · 20-day realised vol {info['hv20']:.0%} · daily range (ATR) {info['atr_pct']:.1%}")
+
+    levels = info["levels"]
+    named = [
+        ("Call wall", levels.get("call_wall")), ("Value area high", levels.get("vah")),
+        ("Point of control", levels.get("poc")), ("Value area low", levels.get("val")),
+        ("Gamma flip", levels.get("flip")), ("Put wall", levels.get("put_wall")),
+        ("Range high", levels.get("range_high")), ("Range low", levels.get("range_low")),
+        ("Last price", info["spot"]),
+    ]
+    table = pd.DataFrame([(n, v) for n, v in named if v is not None], columns=["Level", "Price"])
+    right.markdown("**Key levels**")
+    right.dataframe(table.sort_values("Price", ascending=False), hide_index=True, width="stretch",
+                    column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
+
+    if "net_gex" in levels:
+        gex, dex = right.columns(2)
+        gex.metric("Net GEX per 1% move", structure.signed_short(levels["net_gex"]),
+                   "Moves dampened" if levels["net_gex"] >= 0 else "Moves extended", delta_color="off")
+        dex.metric("Net DEX", structure.signed_short(levels["net_dex"]),
+                   f"{(1 + levels['dex_skew']) / 2:.0%} of delta in calls", delta_color="off")
+
     right.markdown("**Why this direction**")
-    marks = {"+": "▲", "-": "▼", "!": "⚠️"}
-    right.markdown("\n".join(f"- {marks[r[0]]} {r[2:]}" for r in info["reasons"]))
-    right.caption(f"RSI {info['rsi']:.0f} · 20-day realised vol {info['hv20']:.0%} · daily range (ATR) {info['atr_pct']:.1%}")
+    marks = {"+": "▲", "-": "▼", "!": "⚠️", "=": "•"}
+    for method in info["methods"]:
+        lines = "\n".join(f"- {marks[r[0]]} {r[2:]}" for r in method["reasons"])
+        # A bare $ starts LaTeX in Streamlit markdown.
+        right.markdown(f"{method['name']} ({method['score']:+.0f})\n{lines}".replace("$", "\\$"))
 
 
 def paper_test(cfg: dict) -> None:
@@ -259,18 +283,18 @@ def main() -> None:
             detail(pick["ticker"], tickers[pick["ticker"]], pick)
 
     with trends_tab:
+        short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "trend": "Trend"}
         trend_df = pd.DataFrame([
-            {"Ticker": t, "Price": r["spot"], "Trend": r["trend"], "Bias": r["bias"].capitalize(),
-             "RSI": r["rsi"], "Realised vol": r["hv20"] * 100, "Volume vs avg": r["vol_ratio"],
-             "Contracts": len(r["contracts"])}
+            {"Ticker": t, "Price": r["spot"], "Read": r["trend"], "Bias": r["bias"].capitalize(),
+             **{short[m["key"]]: m["score"] for m in r["methods"]},
+             "Wyckoff phase": r["levels"].get("phase", ""), "Contracts": len(r["contracts"])}
             for t, r in tickers.items()
-        ]).sort_values("Trend", ascending=False)
+        ]).sort_values("Read", ascending=False)
+        signed = st.column_config.NumberColumn(format="%+.0f")
         st.dataframe(trend_df, hide_index=True, width="stretch", column_config={
             "Price": st.column_config.NumberColumn(format="$%.2f"),
-            "Trend": st.column_config.NumberColumn(format="%+.0f", help="-100 strongly bearish to +100 strongly bullish."),
-            "RSI": st.column_config.NumberColumn(format="%.0f"),
-            "Realised vol": st.column_config.NumberColumn(format="%.0f%%"),
-            "Volume vs avg": st.column_config.NumberColumn(format="%.2fx"),
+            "Read": st.column_config.NumberColumn(format="%+.0f", help="Combined score, -100 strongly bearish to +100 strongly bullish."),
+            **{name: signed for name in short.values()},
         })
         choice = st.selectbox("Chart a ticker", list(tickers))
         if choice:
@@ -278,22 +302,31 @@ def main() -> None:
 
     with help_tab:
         st.markdown(
-            "Each ticker gets a **trend score** from its daily chart (moving averages, MACD, RSI, "
-            "20-day return). Bullish tickers are searched for calls, bearish ones for puts, and "
-            "neutral ones are skipped. Contracts that fit your budget and liquidity filters are then "
-            "scored out of 100:"
+            "Each ticker gets a **market read** from -100 to +100 that blends five methods. Bullish "
+            "tickers are searched for calls, bearish ones for puts, and mixed ones are skipped."
         )
         st.dataframe(pd.DataFrame([
-            ("Trend", scanner.WEIGHTS["trend"], "How strongly the chart agrees with the contract's direction."),
+            ("Auction / market profile", structure.METHOD_WEIGHTS["auction"] * 100, "Price against the 10-day and prior-day value areas from 30-minute bars, and whether value is migrating."),
+            ("Gamma and delta exposure", structure.METHOD_WEIGHTS["gamma"] * 100, "GEX: net gamma, the flip level and the call and put walls. DEX: whether open delta is call-heavy or put-heavy. Both from open interest out to 45 days."),
+            ("Wyckoff", structure.METHOD_WEIGHTS["wyckoff"] * 100, "Springs, upthrusts and breakouts of a 40-session range, or markup and markdown outside one."),
+            ("Volume price analysis", structure.METHOD_WEIGHTS["vpa"] * 100, "Effort against result on the last five daily bars: no demand, no supply, stopping volume, climaxes."),
+            ("Trend and momentum", structure.METHOD_WEIGHTS["trend"] * 100, "Moving averages, MACD, RSI and 20-day return."),
+        ], columns=["Method", "Weight %", "What it reads"]), hide_index=True, width="stretch")
+        st.markdown("Contracts that fit your budget and liquidity filters are then scored out of 100:")
+        st.dataframe(pd.DataFrame([
+            ("Market read", scanner.WEIGHTS["trend"], "How strongly the combined read agrees with the contract's direction."),
             ("Liquidity", scanner.WEIGHTS["liquidity"], "Tight bid/ask spread and healthy open interest, so you can get in and out."),
             ("Breakeven", scanner.WEIGHTS["breakeven"], "Move needed to break even compared with the move implied volatility expects."),
             ("IV value", scanner.WEIGHTS["iv_value"], "Implied vol vs recent realised vol. Cheaper options score higher."),
+            ("Gamma backdrop", scanner.WEIGHTS["gamma"], "Negative dealer gamma (moves extend) and room to reach breakeven before the wall."),
             ("Theta", scanner.WEIGHTS["theta"], "Share of the premium lost to time decay each day."),
             ("Delta", scanner.WEIGHTS["delta"], f"Closeness to the target delta of {cfg['target_delta']:.2f}."),
         ], columns=["Factor", "Points", "What it measures"]), hide_index=True, width="stretch")
         st.markdown(
             "Greeks are computed with Black-Scholes from the option's mid price, because Yahoo does "
-            "not publish them. A high score is a screen result, not a prediction: most long options "
+            "not publish them. The profile spreads each 30-minute bar's volume evenly across its "
+            "range, and gamma exposure assumes dealers are long calls and short puts, so both are "
+            "estimates. A high score is a screen result, not a prediction: most long options "
             "expire worthless, and the chance-of-profit column is usually well under 50%."
         )
 
