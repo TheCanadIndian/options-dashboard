@@ -1,0 +1,326 @@
+"""Static portfolio page for GitHub Pages, written to docs/index.html."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from datetime import date, datetime
+from html import escape
+from typing import Any
+
+from . import portfolio
+from .config import HOME
+from .scanner import WEIGHTS
+
+OUT = HOME / "docs" / "index.html"
+
+FACTOR_LABELS = {
+    "trend": "Trend strength", "liquidity": "Liquidity", "breakeven": "Breakeven vs expected move",
+    "iv_value": "Option price vs volatility", "theta": "Low time decay", "delta": "Delta near target",
+}
+
+CSS = """
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
+--track:#e1e0d9}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
+--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+--series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;margin:0}h2{font-size:17px;margin:36px 0 12px}
+.sub{color:var(--ink2);margin:4px 0 0}.muted{color:var(--muted)}.small{font-size:13px}
+.notice{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:16px 0 0;color:var(--ink2);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:20px}
+.tile,.card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.tile{padding:12px 14px}.tile .k{color:var(--ink2);font-size:13px}.tile .v{font-size:24px;font-weight:600}
+.tile .d{font-size:13px;color:var(--ink2)}
+.up{color:var(--good)}.down{color:var(--bad)}
+.panel{padding:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:14px}
+.card{padding:14px}
+.card header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
+.card h3{margin:0;font-size:17px}.pl{font-size:17px;font-weight:600;white-space:nowrap}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0}
+.tag{border:1px solid var(--border);border-radius:999px;padding:1px 9px;font-size:12px;color:var(--ink2)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px 12px;margin:12px 0 0}
+.facts div span{display:block;color:var(--ink2);font-size:12px}.facts div b{font-weight:600}
+.range{margin:22px 0 4px}.bar{position:relative;height:6px;border-radius:3px;background:var(--track)}
+.bar i{position:absolute;top:-4px;width:2px;height:14px;background:var(--muted)}
+.bar u{position:absolute;top:-5px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--series);
+border:2px solid var(--surface)}
+.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink2);margin-top:8px}
+details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
+summary{cursor:pointer;font-weight:600}
+details h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
+details ul{margin:0;padding-left:18px}details li{margin:3px 0}
+ul.plain{list-style:none;padding:0}
+.pts{display:grid;grid-template-columns:minmax(120px,1.3fr) 1fr auto;gap:4px 10px;align-items:center;font-size:13px}
+.pts .b{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+.pts .b span{display:block;height:100%;background:var(--series);border-radius:3px}
+.pts .n{font-variant-numeric:tabular-nums;color:var(--ink2)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+#chart{position:relative}#chart svg{display:block;width:100%;height:auto}
+#tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+footer{margin-top:40px;color:var(--muted);font-size:12px}
+"""
+
+CHART_JS = """
+(function(){var el=document.getElementById('chart');if(!el)return;var d=JSON.parse(el.dataset.points),
+svg=el.querySelector('svg'),line=svg.querySelector('#xh'),dot=svg.querySelector('#xd'),tip=document.getElementById('tip');
+function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,
+vx=cx/r.width*800,best=0,gap=1e9;for(var i=0;i<d.length;i++){var g=Math.abs(d[i][0]-vx);if(g<gap){gap=g;best=i}}
+var p=d[best];line.setAttribute('x1',p[0]);line.setAttribute('x2',p[0]);dot.setAttribute('cx',p[0]);
+dot.setAttribute('cy',p[1]);line.style.display=dot.style.display='';tip.style.display='block';
+tip.innerHTML='<b>'+p[3]+'</b><br>'+p[2];var x=p[0]/800*r.width;
+tip.style.left=Math.min(Math.max(x-tip.offsetWidth/2,0),r.width-tip.offsetWidth)+'px';
+tip.style.top=Math.max(p[1]/260*r.height-tip.offsetHeight-12,0)+'px'}
+function out(){line.style.display=dot.style.display='none';tip.style.display='none'}
+svg.addEventListener('mousemove',move);svg.addEventListener('touchstart',move,{passive:true});
+svg.addEventListener('touchmove',move,{passive:true});svg.addEventListener('mouseleave',out)})();
+"""
+
+
+def _money(x: float, cents: bool = True) -> str:
+    return f"${x:,.2f}" if cents else f"${x:,.0f}"
+
+
+def _signed(x: float, cents: bool = True) -> str:
+    body = f"${abs(x):,.2f}" if cents else f"${abs(x):,.0f}"
+    return ("+" if x >= 0 else "−") + body
+
+
+def _delta(x: float, pct: float | None = None) -> str:
+    """Signed dollar change with an arrow, so direction never relies on colour alone."""
+    text = f"{'▲' if x >= 0 else '▼'} {_signed(x)}"
+    if pct is not None:
+        text += f" ({pct:+.1%})"
+    return f'<span class="{"up" if x >= 0 else "down"}">{text}</span>'
+
+
+def _when(iso: str) -> str:
+    t = datetime.fromisoformat(iso)
+    return f"{t:%b} {t.day}, {t:%I:%M %p}".replace(", 0", ", ")
+
+
+def _day(iso: str) -> str:
+    t = datetime.fromisoformat(iso)
+    return f"{t:%b} {t.day}"
+
+
+def _chart(points: list[list], start_cash: float) -> str:
+    if len(points) < 2:
+        return '<p class="muted">The equity chart appears after the second scan.</p>'
+    W, H, L, R, T, B = 800, 260, 56, 12, 12, 28
+    values = [v for _, v in points] + [start_cash]
+    lo, hi = min(values), max(values)
+    pad = max((hi - lo) * 0.15, start_cash * 0.005)
+    lo, hi = lo - pad, hi + pad
+
+    def x(i: int) -> float:
+        return L + (W - L - R) * i / (len(points) - 1)
+
+    def y(v: float) -> float:
+        return T + (H - T - B) * (1 - (v - lo) / (hi - lo))
+
+    grid = []
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        grid.append(
+            f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="var(--grid)"/>'
+            f'<text x="{L - 8}" y="{y(v) + 4:.1f}" text-anchor="end">{_money(v, False)}</text>'
+        )
+    # One x label per trading day, placed at that day's first scan.
+    labels, seen = [], set()
+    for i, (t, _) in enumerate(points):
+        day = t[:10]
+        if day not in seen:
+            seen.add(day)
+            labels.append((x(i), _day(t)))
+    step = max(1, len(labels) // 8)
+    ticks = "".join(
+        f'<text x="{px:.1f}" y="{H - 8}" text-anchor="{"start" if n == 0 else "middle"}">{text}</text>'
+        for n, (px, text) in enumerate(labels) if n % step == 0
+    )
+    path = " ".join(f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for i, (_, v) in enumerate(points))
+    data = [[round(x(i), 1), round(y(v), 1), _money(v), _when(t)] for i, (t, v) in enumerate(points)]
+    base = y(start_cash)
+    return (
+        f'<div id="chart" data-points="{escape(json.dumps(data))}">'
+        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Portfolio value over time" '
+        f'font-size="11" fill="var(--muted)">{"".join(grid)}{ticks}'
+        f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>'
+        f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">Starting {_money(start_cash, False)}</text>'
+        f'<path d="{path}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>'
+        f'<line id="xh" y1="{T}" y2="{H - B}" stroke="var(--axis)" style="display:none"/>'
+        f'<circle id="xd" r="5" fill="var(--series)" stroke="var(--surface)" stroke-width="2" style="display:none"/>'
+        f'</svg><div id="tip"></div></div>'
+    )
+
+
+def _reasoning(pos: dict[str, Any], opened: bool) -> str:
+    marks = {"+": "▲", "-": "▼", "!": "⚠"}
+    trend = "".join(f"<li>{marks[r[0]]} {escape(r[2:])}</li>" for r in pos["trend_reasons"])
+    notes = "".join(f"<li>{escape(n)}</li>" for n in pos["contract_notes"])
+    rows = "".join(
+        f'<div>{FACTOR_LABELS[k]}</div><div class="b"><span style="width:{pos["points"][k] / w * 100:.0f}%"></span></div>'
+        f'<div class="n">{pos["points"][k]:.0f} / {w}</div>'
+        for k, w in WEIGHTS.items()
+    )
+    side = "call" if pos["type"] == "call" else "put"
+    return (
+        f'<details{" open" if opened else ""}><summary>Why this trade</summary>'
+        f'<h4>The chart was {pos["bias"]} (trend score {pos["trend"]:+.0f}), so the scanner looked for a {side}</h4>'
+        f'<ul class="plain">{trend}</ul>'
+        f'<h4>Why this contract</h4><ul>{notes}</ul>'
+        f'<h4>Score {pos["score"]:.0f} out of 100</h4><div class="pts">{rows}</div>'
+        f'<h4>Exit plan set at entry</h4><ul>'
+        f'<li>Take profit at {_money(pos["target_price"])} per share or higher</li>'
+        f'<li>Stop loss at {_money(pos["stop_price"])} or lower</li>'
+        f'<li>Sell on {_day(pos["time_exit"])} if neither has been hit</li></ul></details>'
+    )
+
+
+def _tags(pos: dict[str, Any]) -> str:
+    tags = [f"Score {pos['score']:.0f}", pos["bias"].capitalize()]
+    if pos["earnings_before_expiry"]:
+        tags.append("⚠ Earnings before expiry")
+    return '<div class="tags">' + "".join(f'<span class="tag">{t}</span>' for t in tags) + "</div>"
+
+
+def _open_card(pos: dict[str, Any], commission: float) -> str:
+    value = pos["last_bid"] * 100
+    pnl = value - commission - pos["cost"]
+    span = pos["target_price"] - pos["stop_price"]
+    at = min(max((pos["last_bid"] - pos["stop_price"]) / span, 0), 1) * 100
+    entry_at = (pos["entry_price"] - pos["stop_price"]) / span * 100
+    dte = (date.fromisoformat(pos["expiration"]) - date.today()).days
+    stock = pos["last_spot"] / pos["entry_spot"] - 1
+    return (
+        f'<article class="card"><header><h3>{escape(pos["label"])}</h3>'
+        f'<div class="pl">{_delta(pnl, pnl / pos["cost"])}</div></header>{_tags(pos)}'
+        f'<div class="range"><div class="bar"><i style="left:{entry_at:.1f}%" title="Entry"></i>'
+        f'<u style="left:{at:.1f}%" title="Current bid"></u></div>'
+        f'<div class="ends"><span>Stop {_money(pos["stop_price"])}</span>'
+        f'<span>Bought {_money(pos["entry_price"])} · now {_money(pos["last_bid"])}</span>'
+        f'<span>Target {_money(pos["target_price"])}</span></div></div>'
+        f'<div class="facts">'
+        f'<div><span>Paid</span><b>{_money(pos["cost"])}</b></div>'
+        f'<div><span>Worth now</span><b>{_money(value)}</b></div>'
+        f'<div><span>Bought</span><b>{_when(pos["opened"])}</b></div>'
+        f'<div><span>Days to expiry</span><b>{dte}</b></div>'
+        f'<div><span>{escape(pos["ticker"])} then / now</span><b>{_money(pos["entry_spot"])} / {_money(pos["last_spot"])} ({stock:+.1%})</b></div>'
+        f'<div><span>Best / worst bid</span><b>{_money(pos["high_bid"])} / {_money(pos["low_bid"])}</b></div>'
+        f'</div>{_reasoning(pos, False)}</article>'
+    )
+
+
+def _closed_card(pos: dict[str, Any]) -> str:
+    stock = pos["exit_spot"] / pos["entry_spot"] - 1
+    return (
+        f'<article class="card"><header><h3>{escape(pos["label"])}</h3>'
+        f'<div class="pl">{_delta(pos["pnl"], pos["ret"])}</div></header>'
+        f'<div class="tags"><span class="tag">{escape(pos["exit_reason"])}</span>'
+        f'<span class="tag">Score {pos["score"]:.0f}</span></div>'
+        f'<div class="facts">'
+        f'<div><span>Bought</span><b>{_money(pos["entry_price"])} · {_when(pos["opened"])}</b></div>'
+        f'<div><span>Sold</span><b>{_money(pos["exit_price"])} · {_when(pos["exit_time"])}</b></div>'
+        f'<div><span>{escape(pos["ticker"])} moved</span><b>{stock:+.1%}</b></div>'
+        f'</div>{_reasoning(pos, False)}</article>'
+    )
+
+
+def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
+    start, closed, positions = state["start_cash"], state["closed"], state["positions"]
+    total = portfolio.equity(state)
+    invested = total - state["cash"]
+    realised = sum(c["pnl"] for c in closed)
+    wins = sum(c["pnl"] > 0 for c in closed)
+    tiles = [
+        ("Portfolio value", _money(total), _delta(total - start, total / start - 1) + " since start"),
+        ("Cash", _money(state["cash"]), f"{state['cash'] / total:.0%} of the portfolio"),
+        ("In open positions", _money(invested), f"{len(positions)} of {cfg['sim_max_positions']} slots used"),
+        ("Closed trades", str(len(closed)),
+         (f"{wins} won, {len(closed) - wins} lost · {_delta(realised)}" if closed else "None yet")),
+    ]
+    tile_html = "".join(
+        f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+        for k, v, d in tiles
+    )
+    open_html = (
+        '<div class="cards">' + "".join(_open_card(p, cfg["sim_commission"]) for p in positions) + "</div>"
+        if positions else '<p class="muted">No open positions. The scanner buys when a contract scores '
+                          f'{cfg["sim_min_score"]} or more and there is cash for it.</p>'
+    )
+    closed_html = (
+        '<div class="cards">' + "".join(_closed_card(c) for c in reversed(closed)) + "</div>"
+        if closed else '<p class="muted">Nothing has been sold yet.</p>'
+    )
+    log_rows = "".join(
+        f'<tr><td class="num">{_when(e["time"])}</td><td>{e["action"]}</td><td>{escape(e["label"])}</td>'
+        f'<td class="num">{_money(e["price"])}</td><td>{escape(e["note"])}</td></tr>'
+        for e in reversed(state["log"][-60:])
+    )
+    rules = [
+        f"Starts with {_money(start, False)} in cash. Nothing here is real money.",
+        f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
+        f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
+        f"{cfg['sim_max_positions']} positions, one per stock.",
+        f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
+        f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry.",
+        f"Buys fill at the ask and sells at the bid, with {_money(cfg['sim_commission'])} commission each way.",
+        "Prices come from Yahoo Finance, delayed about 15 minutes, and are checked every 15 minutes while the "
+        "market is open. A real stop order could fill at a different price.",
+        f"After a sale, the same stock is not bought again for {cfg['sim_reentry_days']} days.",
+    ]
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="300">
+<title>Options Paper Portfolio</title><style>{CSS}</style></head>
+<body><main>
+<h1>Options Paper Portfolio</h1>
+<p class="sub">Simulated trades from the options scanner. Started {_when(state["started"])} ET ·
+last updated {_when(state["updated"])} ET</p>
+<div class="tiles">{tile_html}</div>
+<h2>Portfolio value</h2><div class="panel">{_chart(state["equity"], start)}</div>
+<h2>Open positions</h2>{open_html}
+<h2>Closed trades</h2>{closed_html}
+<h2>Activity</h2><div class="panel scroll"><table><thead><tr><th>Time (ET)</th><th>Action</th><th>Contract</th>
+<th>Price</th><th>Note</th></tr></thead><tbody>{log_rows or '<tr><td colspan="5" class="muted">No activity yet.</td></tr>'}</tbody></table></div>
+<h2>How the simulation trades</h2><div class="panel"><ul>{"".join(f"<li>{escape(r)}</li>" for r in rules)}</ul></div>
+<footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
+</main><script>{CHART_JS}</script></body></html>"""
+
+
+def build(state: dict[str, Any], cfg: dict[str, Any]) -> None:
+    OUT.parent.mkdir(exist_ok=True)
+    OUT.write_text(render(state, cfg), encoding="utf-8")
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=HOME, capture_output=True, text=True, timeout=120,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def publish() -> str | None:
+    """Commit and push the page. Returns an error message, or None on success."""
+    page = "docs/index.html"
+    if _git("rev-parse", "--is-inside-work-tree").returncode != 0:
+        return "not a git repository"
+    _git("add", page)
+    if _git("diff", "--cached", "--quiet", "--", page).returncode == 0:
+        return None  # nothing changed
+    commit = _git("commit", "-m", f"Update portfolio page {datetime.now():%Y-%m-%d %H:%M}", "--", page)
+    if commit.returncode != 0:
+        return f"commit failed: {commit.stderr.strip() or commit.stdout.strip()}"
+    push = _git("push")
+    return None if push.returncode == 0 else f"push failed: {push.stderr.strip()}"

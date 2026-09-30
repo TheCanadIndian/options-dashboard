@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.state/
+paper/
+# holds your alert topic and webhook
+config.json

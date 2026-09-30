@@ -1,0 +1,24 @@
+[project]
+name = "options-dashboard"
+version = "0.1.0"
+description = "Options scanner for small accounts using greeks and technical analysis"
+authors = [
+    { name = "TheCanadIndian", email = "33072949+TheCanadIndian@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "plotly>=7.1.0",
+    "requests>=2.34.2",
+    "scipy>=1.18.1",
+    "streamlit>=1.64.0",
+    "yfinance>=1.7.0",
+]
+
+[project.scripts]
+options-scan = "options_dashboard.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
