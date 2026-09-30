@@ -174,11 +174,14 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
                     column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
 
     if "net_gex" in levels:
-        gex, dex = right.columns(2)
-        gex.metric("Net GEX per 1% move", structure.signed_short(levels["net_gex"]),
-                   "Moves dampened" if levels["net_gex"] >= 0 else "Moves extended", delta_color="off")
-        dex.metric("Net DEX", structure.signed_short(levels["net_dex"]),
-                   f"{(1 + levels['dex_skew']) / 2:.0%} of delta in calls", delta_color="off")
+        gex, vanna, charm = right.columns(3)
+        gex.metric("Net gamma per 1%", structure.signed_short(levels["net_gex"]),
+                   "Moves dampened" if levels["net_gex"] >= 0 else "Moves extended", delta_color="off",
+                   help="Dollar gamma dealers carry per 1% move in the stock.")
+        vanna.metric("Vanna flow", structure.signed_short(levels["vanna_flow"]), "per 1-pt fall in IV", delta_color="off",
+                     help="Stock dealers buy (+) or sell (-) when implied volatility falls one point. The sign reverses when it rises.")
+        charm.metric("Charm flow", structure.signed_short(levels["charm_flow"]), "per day", delta_color="off",
+                     help="Stock dealers buy (+) or sell (-) each day as time decay changes their delta.")
 
     right.markdown("**Why this direction**")
     marks = {"+": "▲", "-": "▼", "!": "⚠️", "=": "•"}
@@ -307,7 +310,7 @@ def main() -> None:
         )
         st.dataframe(pd.DataFrame([
             ("Auction / market profile", structure.METHOD_WEIGHTS["auction"] * 100, "Price against the 10-day and prior-day value areas from 30-minute bars, and whether value is migrating."),
-            ("Gamma and delta exposure", structure.METHOD_WEIGHTS["gamma"] * 100, "GEX: net gamma, the flip level and the call and put walls. DEX: whether open delta is call-heavy or put-heavy. Both from open interest out to 45 days."),
+            ("Dealer gamma, vanna and charm", structure.METHOD_WEIGHTS["gamma"] * 100, "Gamma: net exposure, the flip level and the call and put walls. Vanna and charm: the stock dealers must buy or sell as implied volatility and time change their delta. All from open interest out to 45 days."),
             ("Wyckoff", structure.METHOD_WEIGHTS["wyckoff"] * 100, "Springs, upthrusts and breakouts of a 40-session range, or markup and markdown outside one."),
             ("Volume price analysis", structure.METHOD_WEIGHTS["vpa"] * 100, "Effort against result on the last five daily bars: no demand, no supply, stopping volume, climaxes."),
             ("Trend and momentum", structure.METHOD_WEIGHTS["trend"] * 100, "Moving averages, MACD, RSI and 20-day return."),

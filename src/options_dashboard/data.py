@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime
 
@@ -44,6 +45,25 @@ def open_interest(ticker: str, max_dte: int) -> pd.DataFrame:
         path.parent.mkdir(parents=True, exist_ok=True)
         pd.to_pickle({"date": today, "chain": chain}, path)
     return chain
+
+
+def iv_change(ticker: str, atm_iv: float) -> float | None:
+    """Record today's first at-the-money IV and return its change from the previous session.
+
+    None until there is an earlier reading from the last week to compare against.
+    """
+    path = STATE_DIR / "iv" / f"{ticker}.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        history = {}
+    today = date.today().isoformat()
+    if today not in history:
+        history[today] = atm_iv
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(dict(sorted(history.items())[-30:])), encoding="utf-8")
+    earlier = [d for d in history if d < today and (date.today() - date.fromisoformat(d)).days <= 7]
+    return history[today] - history[max(earlier)] if earlier else None
 
 
 def spot_price(ticker: str, fallback: float) -> float:

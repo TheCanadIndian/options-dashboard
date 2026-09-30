@@ -25,7 +25,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 # Share of the composite direction score each method contributes.
 METHOD_WEIGHTS = {"auction": 0.25, "gamma": 0.20, "wyckoff": 0.15, "vpa": 0.15, "trend": 0.25}
 METHOD_NAMES = {
-    "auction": "Auction / market profile", "gamma": "Gamma and delta exposure (GEX / DEX)", "wyckoff": "Wyckoff",
+    "auction": "Auction / market profile", "gamma": "Dealer gamma, vanna and charm", "wyckoff": "Wyckoff",
     "vpa": "Volume price analysis", "trend": "Trend and momentum",
 }
 
@@ -243,11 +243,20 @@ def signed_short(x: float) -> str:
     return ("+" if x >= 0 else "-") + _short(x)
 
 
-def gamma(chain: pd.DataFrame, spot: float, rate: float) -> dict[str, Any] | None:
-    """Gamma and delta exposure (GEX and DEX) from open interest.
+FLOW_MIN = 0.002  # vanna flow per vol point below this share of average daily dollar volume is ignored
+# Charm flow is positive for almost every stock (out-of-the-money options dominate and their
+# delta decays toward zero), so it only counts when it is large.
+CHARM_MIN = 0.01
 
-    GEX gives the walls, the flip level and whether hedging dampens or extends moves.
-    DEX gives the directional lean of open positioning.
+
+def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
+          vol_trend: int, vol_note: str) -> dict[str, Any] | None:
+    """Dealer gamma, vanna and charm exposure from open interest.
+
+    Gamma gives the walls, the flip level and whether hedging dampens or extends moves.
+    Vanna and charm give the stock dealers must trade as implied volatility and time
+    change their delta. `vol_trend` is -1 when implied volatility is falling, +1 when
+    rising and 0 when unknown; `vol_note` says how that was judged.
     """
     # Contracts expiring today are left out: their gamma swamps the walls and is gone by the close.
     df = chain[
@@ -277,14 +286,11 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float) -> dict[str, Any] | Non
     call_wall = float(gex[is_call].groupby(level=0).sum().idxmax())
     put_wall = float(gex[~is_call].groupby(level=0).sum().idxmin())
 
-    # Delta exposure: the share-equivalent dollars held through open options.
-    # Calls add long delta and puts add short delta, so the net shows which side is loaded.
-    dex = pd.Series(greeks.greeks(spot, K, T, rate, iv, 0.0, is_call)["delta"] * oi * 100 * spot, index=K)
-    call_dex, put_dex = float(dex[is_call].sum()), float(dex[~is_call].sum())
-    net_dex = call_dex + put_dex
-    dex_skew = net_dex / (call_dex - put_dex) if call_dex - put_dex > 0 else 0.0  # -1 all puts .. +1 all calls
-    by_strike = dex.groupby(level=0).sum()
-    dex_call_strike, dex_put_strike = float(by_strike.idxmax()), float(by_strike.idxmin())
+    # Vanna and charm: how much stock dealers must trade as volatility and time change their delta.
+    # Positive numbers are dollars of stock bought.
+    second = greeks.greeks(spot, K, T, rate, iv, 0.0, is_call)
+    vanna_flow = float((second["vanna"] * oi * 100 * spot * sign).sum())  # per 1-point fall in IV
+    charm_flow = float(-(second["charm"] * oi * 100 * spot * sign).sum())  # per day of time decay
 
     grid = np.linspace(spot * 0.85, spot * 1.15, 61)
     nets = np.array([exposure(p).sum() for p in grid])
@@ -312,19 +318,41 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float) -> dict[str, Any] | Non
         score += 20
         reasons.append(f"! Sitting on the ${put_wall:g} put wall, which tends to act as support")
 
-    split = (f"net delta {'+' if net_dex >= 0 else '-'}{_short(net_dex)} "
-             f"(calls +{_short(call_dex)}, puts -{_short(put_dex)})")
-    if dex_skew >= 0.25:
-        score += 20
-        reasons.append(f"+ Delta exposure is call-heavy: {split}, most concentrated at the ${dex_call_strike:g} strike")
-    elif dex_skew <= -0.25:
-        score -= 20
-        reasons.append(f"- Delta exposure is put-heavy: {split}, most concentrated at the ${dex_put_strike:g} strike")
+    # A flow only counts when it is a meaningful share of a normal day's trading.
+    vanna_now = -vol_trend * vanna_flow  # falling IV (trend -1) realises the flow as written
+    if vol_trend == 0 or abs(vanna_flow) < FLOW_MIN * adv_dollars:
+        reasons.append(f"= Vanna: dealers would {'buy' if vanna_flow >= 0 else 'sell'} {_short(vanna_flow)} of stock "
+                       f"per 1-point fall in implied volatility, too small or too unclear to lean on")
     else:
-        reasons.append(f"= Delta exposure is balanced: {split}")
+        score += 20 if vanna_now > 0 else -20
+        reasons.append(
+            f"{'+' if vanna_now > 0 else '-'} Vanna {'tailwind' if vanna_now > 0 else 'headwind'}: implied volatility "
+            f"is {'falling' if vol_trend < 0 else 'rising'} ({vol_note}), which makes dealers "
+            f"{'buy' if vanna_now > 0 else 'sell'} about {_short(vanna_flow)} of stock per point"
+        )
+    if abs(charm_flow) < CHARM_MIN * adv_dollars:
+        reasons.append(f"= Charm: time decay has dealers {'buying' if charm_flow >= 0 else 'selling'} "
+                       f"{_short(charm_flow)} of stock a day, too small to matter")
+    else:
+        score += 20 if charm_flow > 0 else -20
+        reasons.append(
+            f"{'+' if charm_flow > 0 else '-'} Charm {'tailwind' if charm_flow > 0 else 'headwind'}: as time passes, "
+            f"dealers must {'buy' if charm_flow > 0 else 'sell'} about {_short(charm_flow)} of stock a day to stay hedged"
+        )
 
     return _out(score, reasons, call_wall=call_wall, put_wall=put_wall, flip=flip, net_gex=net,
-                net_dex=net_dex, call_dex=call_dex, put_dex=put_dex, dex_skew=float(dex_skew))
+                vanna_flow=vanna_flow, charm_flow=charm_flow)
+
+
+def atm_iv(chain: pd.DataFrame, spot: float) -> float | None:
+    """Median implied volatility of the strikes nearest the money, a week or more out."""
+    days = (pd.to_datetime(chain["expiration"]) - pd.Timestamp(date.today())).dt.days
+    df = chain[(days >= 7) & (chain["impliedVolatility"] > 0.03) & (chain["impliedVolatility"] < 5)]
+    if df.empty:
+        return None
+    df = df[df["expiration"] == df["expiration"].min()]
+    nearest = df.assign(gap=(df["strike"] - spot).abs()).nsmallest(6, "gap")
+    return float(nearest["impliedVolatility"].median())
 
 
 # ---------------------------------------------------------------- composite

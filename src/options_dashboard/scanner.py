@@ -46,10 +46,25 @@ def _read_structure(ticker: str, ind: pd.DataFrame, snap: dict, spot: float, rat
         except Exception:
             return None
 
+    def dealer_exposure():
+        chain = data.open_interest(ticker, GAMMA_MAX_DTE)
+        adv_dollars = float(ind["Volume"].rolling(20).mean().iloc[-1]) * spot
+        # Vanna needs the direction of implied volatility. Use its day-over-day change when
+        # there is one on file, otherwise infer it from price: volatility falls as stocks rise.
+        level = structure.atm_iv(chain, spot)
+        change = data.iv_change(ticker, level) if level else None
+        if change is not None and abs(change) >= 0.005:
+            trend, note = (1 if change > 0 else -1), f"{change * 100:+.1f} points since the last session"
+        else:
+            week = spot / float(ind["Close"].iloc[-6]) - 1
+            trend = 0 if abs(week) < 0.01 else (-1 if week > 0 else 1)
+            note = f"inferred from the stock's {week:+.1%} move this week"
+        return structure.gamma(chain, spot, rate, adv_dollars, trend, note)
+
     atr = float(ind["atr"].iloc[-1])
     return {
         "auction": attempt(lambda: structure.auction(data.intraday(ticker), atr)),
-        "gamma": attempt(lambda: structure.gamma(data.open_interest(ticker, GAMMA_MAX_DTE), spot, rate)),
+        "gamma": attempt(dealer_exposure),
         "wyckoff": attempt(lambda: structure.wyckoff(ind)),
         "vpa": attempt(lambda: structure.vpa(ind)),
         "trend": {"score": snap["trend"], "reasons": snap["reasons"]},

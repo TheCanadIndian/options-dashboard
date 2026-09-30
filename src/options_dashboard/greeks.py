@@ -26,7 +26,8 @@ def price(S, K, T, r, sigma, q=0.0, is_call=True):
 
 
 def greeks(S, K, T, r, sigma, q=0.0, is_call=True) -> dict[str, np.ndarray]:
-    """Delta, gamma, theta (per calendar day), vega (per 1 vol point), rho (per 1% rate)."""
+    """Delta, gamma, theta (per calendar day), vega (per 1 vol point), rho (per 1% rate),
+    vanna (delta change per 1 vol point) and charm (delta change per calendar day)."""
     S, K, T, sigma = (np.asarray(x, dtype=float) for x in (S, K, T, sigma))
     is_call = np.asarray(is_call, dtype=bool)
     d1, d2 = _d1_d2(S, K, T, r, sigma, q)
@@ -39,8 +40,14 @@ def greeks(S, K, T, r, sigma, q=0.0, is_call=True) -> dict[str, np.ndarray]:
     theta_call = decay - r * K * disc_r * norm.cdf(d2) + q * S * disc_q * norm.cdf(d1)
     theta_put = decay + r * K * disc_r * norm.cdf(-d2) - q * S * disc_q * norm.cdf(-d1)
     rho = np.where(is_call, K * T * disc_r * norm.cdf(d2), -K * T * disc_r * norm.cdf(-d2))
+    # Second-order: how delta moves with volatility (vanna) and with time (charm).
+    vanna = -disc_q * pdf * d2 / sigma
+    drift = disc_q * pdf * (2 * (r - q) * T - d2 * sigma * np.sqrt(T)) / (2 * T * sigma * np.sqrt(T))
+    charm = np.where(is_call, q * disc_q * norm.cdf(d1) - drift, -q * disc_q * norm.cdf(-d1) - drift)
 
     return {
+        "vanna": vanna / 100.0,
+        "charm": charm / 365.0,
         "delta": delta,
         "gamma": gamma,
         "theta": np.where(is_call, theta_call, theta_put) / 365.0,

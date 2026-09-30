@@ -53,6 +53,8 @@ h1{font-size:24px;margin:0}h2{font-size:17px;margin:36px 0 12px}
 .bar u{position:absolute;top:-5px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--series);
 border:2px solid var(--surface)}
 .ends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink2);margin-top:8px}
+.review{margin:12px 0 0;padding:8px 10px;border-left:3px solid var(--series);background:var(--page);
+border-radius:4px;font-size:13px;color:var(--ink2)}.review b{color:var(--ink)}
 details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
 summary{cursor:pointer;font-weight:600}
 details h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
@@ -199,6 +201,16 @@ def _reasoning(pos: dict[str, Any], opened: bool) -> str:
     )
 
 
+def _review(pos: dict[str, Any]) -> str:
+    """The most recent end-of-day review, if the position has had one."""
+    if not pos.get("reviews"):
+        return ""
+    last = pos["reviews"][-1]
+    changed = f' Changed since entry: {escape("; ".join(last["changed"]))}.' if last["changed"] else ""
+    return (f'<p class="review"><b>End-of-day review, {_when(last["time"])}: {escape(last["verdict"])}.</b> '
+            f'{escape(last["note"])}{changed}</p>')
+
+
 def _tags(pos: dict[str, Any]) -> str:
     tags = [f"Score {pos['score']:.0f}", pos["bias"].capitalize()]
     if pos["earnings_before_expiry"]:
@@ -229,7 +241,7 @@ def _open_card(pos: dict[str, Any], commission: float) -> str:
         f'<div><span>Days to expiry</span><b>{dte}</b></div>'
         f'<div><span>{escape(pos["ticker"])} then / now</span><b>{_money(pos["entry_spot"])} / {_money(pos["last_spot"])} ({stock:+.1%})</b></div>'
         f'<div><span>Best / worst bid</span><b>{_money(pos["high_bid"])} / {_money(pos["low_bid"])}</b></div>'
-        f'</div>{_reasoning(pos, False)}</article>'
+        f'</div>{_review(pos)}{_reasoning(pos, False)}</article>'
     )
 
 
@@ -244,7 +256,7 @@ def _closed_card(pos: dict[str, Any]) -> str:
         f'<div><span>Bought</span><b>{_money(pos["entry_price"])} · {_when(pos["opened"])}</b></div>'
         f'<div><span>Sold</span><b>{_money(pos["exit_price"])} · {_when(pos["exit_time"])}</b></div>'
         f'<div><span>{escape(pos["ticker"])} moved</span><b>{stock:+.1%}</b></div>'
-        f'</div>{_reasoning(pos, False)}</article>'
+        f'</div>{_review(pos)}{_reasoning(pos, False)}</article>'
     )
 
 
@@ -282,13 +294,16 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
     rules = [
         f"Starts with {_money(start, False)} in cash. Nothing here is real money.",
         "Direction comes from a combined read of auction and market profile (value area, point of control), "
-        "gamma and delta exposure (GEX walls and flip level, DEX positioning), Wyckoff structure, volume price analysis, and trend. Bullish reads "
+        "dealer gamma, vanna and charm (walls, flip level, hedging flows), Wyckoff structure, volume price analysis, and trend. Bullish reads "
         "look for calls, bearish reads for puts, and mixed reads are skipped.",
         f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
         f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
         f"{cfg['sim_max_positions']} positions, one per stock.",
         f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
         f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry.",
+        f"At {cfg['sim_review_time']} New York time each day, every open position is re-checked against the "
+        "current read. It is held if the read still points its way. If the read has gone neutral, a winner is "
+        "kept with its stop raised to the entry price and a loser is sold. If the read has reversed, it is sold.",
         f"Buys fill at the ask and sells at the bid, with {_money(cfg['sim_commission'])} commission each way.",
         "Prices come from Yahoo Finance, delayed about 15 minutes, and are checked every 15 minutes while the "
         "market is open. A real stop order could fill at a different price.",
