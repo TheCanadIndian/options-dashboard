@@ -42,7 +42,7 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
         state = portfolio.update(result, cfg)
         print(f"Portfolio: ${portfolio.equity(state):,.2f} "
               f"({len(state['positions'])} open, {len(state['closed'])} closed, cash ${state['cash']:,.2f})")
-        site.build(state, cfg)
+        site.build(state, cfg, result)
         if cfg["site_push"]:
             error = site.publish()
             if error:

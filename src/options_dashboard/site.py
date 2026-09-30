@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
@@ -68,10 +68,39 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
 th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav a{padding:5px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
+nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
+td a{color:inherit}
+.sortable th{cursor:pointer;white-space:nowrap;user-select:none}
+.sortable th[data-dir=asc]::after{content:" ▲"}.sortable th[data-dir=desc]::after{content:" ▼"}
+.sortable td{white-space:nowrap}
+.filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
+.filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
+.card:target{outline:2px solid var(--series)}
 #chart{position:relative}#chart svg{display:block;width:100%;height:auto}
 #tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 footer{margin-top:40px;color:var(--muted);font-size:12px}
+"""
+
+METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA", "trend": "Trend"}
+
+TABLE_JS = """
+document.querySelectorAll('table.sortable').forEach(function(table){
+table.querySelectorAll('th').forEach(function(th,i){th.tabIndex=0;function sort(){
+var body=table.tBodies[0],dir=th.dataset.dir==='desc'?'asc':'desc';
+table.querySelectorAll('th').forEach(function(o){delete o.dataset.dir});th.dataset.dir=dir;
+Array.from(body.rows).sort(function(a,b){var x=a.cells[i].dataset.v,y=b.cells[i].dataset.v,
+nx=parseFloat(x),ny=parseFloat(y),c=(isNaN(nx)||isNaN(ny))?x.localeCompare(y):nx-ny;
+return dir==='asc'?c:-c}).forEach(function(r){body.appendChild(r)})}
+th.addEventListener('click',sort);th.addEventListener('keydown',function(e){if(e.key==='Enter')sort()})})});
+(function(){var t=document.getElementById('f-ticker'),b=document.getElementById('f-buy'),
+n=document.getElementById('f-count');if(!t)return;var rows=document.querySelectorAll('#flagged tbody tr');
+function apply(){var shown=0;rows.forEach(function(r){var ok=(!t.value||r.dataset.t===t.value)&&
+(!b.checked||r.dataset.b==='1');r.style.display=ok?'':'none';shown+=ok});
+n.textContent='Showing '+shown+' of '+rows.length}
+t.addEventListener('change',apply);b.addEventListener('change',apply);apply()})();
 """
 
 CHART_JS = """
@@ -167,19 +196,24 @@ def _chart(points: list[list], start_cash: float) -> str:
     )
 
 
-def _reasoning(pos: dict[str, Any], opened: bool) -> str:
+def _lines(reasons: list[str]) -> str:
     marks = {"+": "▲", "-": "▼", "!": "⚠", "=": "•"}
+    return "".join(f"<li>{marks[r[0]]} {escape(r[2:])}</li>" for r in reasons)
 
-    def lines(reasons: list[str]) -> str:
-        return "".join(f"<li>{marks[r[0]]} {escape(r[2:])}</li>" for r in reasons)
 
+def _methods_html(methods: list[dict[str, Any]]) -> str:
+    """Each method's score and the observations behind it."""
+    return "".join(
+        f'<h4>{escape(m["name"])}: {m["score"]:+.0f}</h4><ul class="plain">{_lines(m["reasons"])}</ul>'
+        for m in methods
+    )
+
+
+def _reasoning(pos: dict[str, Any], opened: bool) -> str:
     if "methods" in pos:
-        read = "".join(
-            f'<h4>{escape(m["name"])}: {m["score"]:+.0f}</h4><ul class="plain">{lines(m["reasons"])}</ul>'
-            for m in pos["methods"]
-        )
+        read = _methods_html(pos["methods"])
     else:  # positions opened before the market-structure methods were added
-        read = f'<ul class="plain">{lines(pos["trend_reasons"])}</ul>'
+        read = f'<ul class="plain">{_lines(pos["trend_reasons"])}</ul>'
     notes = "".join(f"<li>{escape(n)}</li>" for n in pos["contract_notes"])
     weights = pos.get("weights", LEGACY_WEIGHTS)
     rows = "".join(
@@ -309,30 +343,170 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
         "market is open. A real stop order could fill at a different price.",
         f"After a sale, the same stock is not bought again for {cfg['sim_reentry_days']} days.",
     ]
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex">
-<meta http-equiv="refresh" content="300">
-<title>Options Paper Portfolio</title><style>{CSS}</style></head>
-<body><main>
-<h1>Options Paper Portfolio</h1>
-<p class="sub">Simulated trades from the options scanner. Started {_when(state["started"])} ET ·
-last updated {_when(state["updated"])} ET</p>
-<div class="tiles">{tile_html}</div>
+    body = f"""<div class="tiles">{tile_html}</div>
 <h2>Portfolio value</h2><div class="panel">{_chart(state["equity"], start)}</div>
 <h2>Open positions</h2>{open_html}
 <h2>Closed trades</h2>{closed_html}
 <h2>Activity</h2><div class="panel scroll"><table><thead><tr><th>Time (ET)</th><th>Action</th><th>Contract</th>
 <th>Price</th><th>Note</th></tr></thead><tbody>{log_rows or '<tr><td colspan="5" class="muted">No activity yet.</td></tr>'}</tbody></table></div>
-<h2>How the simulation trades</h2><div class="panel"><ul>{"".join(f"<li>{escape(r)}</li>" for r in rules)}</ul></div>
+<h2>How the simulation trades</h2><div class="panel"><ul>{"".join(f"<li>{escape(r)}</li>" for r in rules)}</ul></div>"""
+    sub = (f"Simulated trades from the options scanner. Started {_when(state['started'])} ET · "
+           f"last updated {_when(state['updated'])} ET")
+    return _page("Portfolio", sub, body, CHART_JS)
+
+
+def _page(active: str, sub: str, body: str, script: str) -> str:
+    nav = "".join(
+        f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
+        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"))
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="300">
+<title>Options {active}</title><style>{CSS}</style></head>
+<body><main>
+<nav>{nav}</nav>
+<h1>{"Options Paper Portfolio" if active == "Portfolio" else "Options Scanner"}</h1>
+<p class="sub">{sub}</p>
+{body}
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
-</main><script>{CHART_JS}</script></body></html>"""
+</main><script>{script}</script></body></html>"""
 
 
-def build(state: dict[str, Any], cfg: dict[str, Any]) -> None:
+def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: set[str]) -> tuple[str, bool]:
+    """Why a flagged contract is or is not in the portfolio, and whether it is buy grade."""
+    held = {p["symbol"] for p in state["positions"]}
+    held_tickers = {p["ticker"] for p in state["positions"]}
+    grade = row["score"] >= cfg["sim_min_score"] and not row["stale"]
+    if row["contractSymbol"] in held:
+        return "In portfolio", grade
+    if row["stale"]:
+        return "No live quote", False
+    if not grade:
+        return f"Below {cfg['sim_min_score']}", False
+    if row["ticker"] in held_tickers:
+        return f"Buy grade · holding {row['ticker']}", True
+    if row["ticker"] in resting:
+        return "Buy grade · cooling off", True
+    if len(state["positions"]) >= cfg["sim_max_positions"]:
+        return "Buy grade · slots full", True
+    if row["ask"] * 100 + cfg["sim_commission"] > state["cash"]:
+        return "Buy grade · no cash", True
+    return "Buy grade", True
+
+
+def _cell(value: Any, text: str, numeric: bool = True) -> str:
+    return f'<td{" class=\"num\"" if numeric else ""} data-v="{escape(str(value))}">{text}</td>'
+
+
+def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
+    contracts, tickers = result["contracts"], result["tickers"]
+    cutoff = (datetime.now() - timedelta(days=cfg["sim_reentry_days"])).isoformat()
+    resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
+
+    rows, buy_grade = [], 0
+    for _, r in contracts.iterrows():
+        status, grade = _buy_status(r, state, cfg, resting)
+        buy_grade += grade
+        spread = "n/a" if r["spread_pct"] != r["spread_pct"] else f"{r['spread_pct']:.1f}%"
+        ratio = "n/a" if r["iv_hv"] != r["iv_hv"] else f"{r['iv_hv']:.2f}"
+        warn = " ⚠" if r["earnings_before_expiry"] else ""
+        rows.append(
+            f'<tr data-t="{escape(r["ticker"])}" data-b="{int(grade)}">'
+            + _cell(r["score"], f"{r['score']:.0f}")
+            + _cell(r["ticker"], f'<a href="#read-{escape(r["ticker"])}">{escape(r["ticker"])}</a>', False)
+            + _cell(r["type"], r["type"].capitalize(), False)
+            + _cell(r["strike"], f"${r['strike']:g}")
+            + _cell(r["expiration"], _day(r["expiration"]) + warn)
+            + _cell(r["cost"], _money(r["cost"], False))
+            + _cell(status, escape(status), False)
+            + _cell(r["dte"], str(int(r["dte"])))
+            + _cell(r["delta"], f"{r['delta']:+.2f}")
+            + _cell(abs(r["theta"]), f"−${abs(r['theta']) * 100:.2f}")
+            + _cell(r["iv"], f"{r['iv']:.0%}")
+            + _cell(r["iv_hv"], ratio)
+            + _cell(r["breakeven_move"], f"{r['breakeven_move']:.1%}")
+            + _cell(r["pop"], f"{r['pop']:.0%}")
+            + _cell(r["spread_pct"], spread)
+            + _cell(r["openInterest"], f"{int(r['openInterest']):,}") + "</tr>"
+        )
+    heads = ["Score", "Ticker", "Type", "Strike", "Expiry", "Cost", "Status", "Days", "Delta", "Theta/day", "IV",
+             "IV/HV", "Breakeven move", "Chance of profit", "Spread", "Open interest"]
+    options = "".join(f"<option>{escape(t)}</option>" for t in sorted(contracts["ticker"].unique()))
+    table = (
+        '<div class="filters"><label>Ticker <select id="f-ticker"><option value="">All</option>'
+        f'{options}</select></label><label><input type="checkbox" id="f-buy"> Buy grade only</label>'
+        '<span class="muted small" id="f-count"></span></div>'
+        '<div class="panel scroll"><table class="sortable" id="flagged"><thead><tr>'
+        + "".join(f"<th>{h}</th>" for h in heads) + f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+        '<p class="muted small">Select a column heading to sort. ⚠ marks an expiry that falls after the next '
+        'earnings date. Cost is the ask price for one contract. Buy grade means the score is high enough to buy; '
+        'the note after it says why the portfolio has not.</p>'
+        if rows else '<p class="muted">No contracts passed the filters on the last scan.</p>'
+    )
+
+    keys = list(METHOD_SHORT)
+    read_rows, cards = [], []
+    for t, info in sorted(tickers.items(), key=lambda kv: -kv[1]["trend"]):
+        scores = {m["key"]: m["score"] for m in info["methods"]}
+        lv = info["levels"]
+        arrow = {"bullish": "▲ Bullish", "bearish": "▼ Bearish", "neutral": "• Neutral"}[info["bias"]]
+
+        def level(name: str) -> str:
+            value = lv.get(name)
+            return _cell(value if value is not None else "", "n/a" if value is None else f"${value:,.2f}")
+
+        read_rows.append(
+            "<tr>" + _cell(t, f'<a href="#read-{escape(t)}">{escape(t)}</a>', False)
+            + _cell(info["spot"], _money(info["spot"]))
+            + _cell(info["trend"], f"{info['trend']:+.0f}") + _cell(info["bias"], arrow, False)
+            + "".join(_cell(scores.get(k, ""), f"{scores[k]:+.0f}" if k in scores else "n/a") for k in keys)
+            + _cell(lv.get("phase", ""), escape(lv.get("phase", "n/a")), False)
+            + level("put_wall") + level("flip") + level("call_wall") + level("val") + level("poc") + level("vah")
+            + _cell(len(info["contracts"]), str(len(info["contracts"]))) + "</tr>"
+        )
+        cards.append(
+            f'<article class="card" id="read-{escape(t)}"><header><h3>{escape(t)} · {_money(info["spot"])}</h3>'
+            f'<div class="pl">{arrow} {info["trend"]:+.0f}</div></header>'
+            f'<details><summary>Reasoning</summary>{_methods_html(info["methods"])}</details></article>'
+        )
+    read_heads = ["Ticker", "Price", "Read", "Bias", *METHOD_SHORT.values(), "Wyckoff phase", "Put wall",
+                  "Gamma flip", "Call wall", "Value low", "Point of control", "Value high", "Flagged"]
+
+    tiles = [
+        ("Contracts flagged", str(len(contracts)), f"from {contracts['ticker'].nunique()} of {len(tickers)} tickers"),
+        ("Buy grade", str(buy_grade), f"score {cfg['sim_min_score']} or more with a live quote"),
+        ("Top score", f"{contracts['score'].max():.0f}" if len(contracts) else "None", "out of 100"),
+        ("Max cost per contract", _money(cfg["account_size"] * cfg["risk_per_trade_pct"] / 100, False),
+         f"{cfg['risk_per_trade_pct']:g}% of the account"),
+    ]
+    tile_html = "".join(
+        f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+        for k, v, d in tiles
+    )
+    errors = (
+        '<p class="notice">Could not scan: ' + escape(", ".join(result["errors"])) + "</p>" if result["errors"] else ""
+    )
+    body = f"""<div class="tiles">{tile_html}</div>{errors}
+<h2>All flagged contracts</h2>{table}
+<h2>Market read by ticker</h2>
+<div class="panel scroll"><table class="sortable"><thead><tr>{"".join(f"<th>{h}</th>" for h in read_heads)}</tr></thead>
+<tbody>{"".join(read_rows)}</tbody></table></div>
+<p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
+at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
+<h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
+    sub = (f"Every contract that passed the filters on the last scan, whether or not the portfolio bought it. "
+           f"Last scan {_when(result['scanned_at'].isoformat())} ET")
+    return _page("Scanner", sub, body, TABLE_JS)
+
+
+def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(render(state, cfg), encoding="utf-8")
+    if result is not None:
+        OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -343,14 +517,14 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 
 
 def publish() -> str | None:
-    """Commit and push the page. Returns an error message, or None on success."""
-    page = "docs/index.html"
+    """Commit and push the pages. Returns an error message, or None on success."""
+    page = "docs"
     if _git("rev-parse", "--is-inside-work-tree").returncode != 0:
         return "not a git repository"
     _git("add", page)
     if _git("diff", "--cached", "--quiet", "--", page).returncode == 0:
         return None  # nothing changed
-    commit = _git("commit", "-m", f"Update portfolio page {datetime.now():%Y-%m-%d %H:%M}", "--", page)
+    commit = _git("commit", "-m", f"Update site {datetime.now():%Y-%m-%d %H:%M}", "--", page)
     if commit.returncode != 0:
         return f"commit failed: {commit.stderr.strip() or commit.stdout.strip()}"
     push = _git("push")
