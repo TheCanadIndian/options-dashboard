@@ -26,6 +26,7 @@ DEFAULTS: dict[str, Any] = {
     "universe_min_market_cap": 2_000_000_000,
     "universe_min_option_oi": 10000,  # contracts within 10% of the money, all expiries 7-60 days out
     "universe_max_spread_pct": 10.0,  # median at-the-money bid/ask spread
+    "universe_max_spread_width": 0.05,  # or this many dollars wide, for cheap options
     "account_size": 1000.0,
     "risk_per_trade_pct": 15.0,  # max premium per contract as % of account
     "min_dte": 21,
@@ -41,6 +42,11 @@ DEFAULTS: dict[str, Any] = {
     "alert_min_score": 70,
     "alert_cooldown_hours": 24,
     "alert_max_per_scan": 5,
+    # Earnings outlook (see earnings.py)
+    "earnings_window_days": 21,  # analyse reports this many days ahead
+    "earnings_min_open_interest": 50,
+    "earnings_max_spread": 0.25,  # bid/ask spread as a share of the mid
+    "earnings_max_plays": 4,
     "paper_min_score": 50,  # picks at or above this are logged as paper trades
     # Simulated portfolio (starts with account_size in cash)
     "sim_min_score": 70,  # buy picks at or above this score

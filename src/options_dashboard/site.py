@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
-from . import portfolio, universe
+from . import earnings, portfolio, universe
 from .config import HOME
 
 OUT = HOME / "docs" / "index.html"
@@ -358,7 +358,7 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
-        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"))
+        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"), ("Earnings", "earnings.html"))
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -368,7 +368,7 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 <title>Options {active}</title><style>{CSS}</style></head>
 <body><main>
 <nav>{nav}</nav>
-<h1>{"Options Paper Portfolio" if active == "Portfolio" else "Options Scanner"}</h1>
+<h1>{TITLES[active]}</h1>
 <p class="sub">{sub}</p>
 {body}
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
@@ -508,11 +508,155 @@ qualifying contract would cost well over the per-trade limit, so its options wer
     return _page("Scanner", sub, body, TABLE_JS)
 
 
+TITLES = {"Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner", "Earnings": "Earnings Outlook"}
+LEANS = {"bullish": "▲ Bullish", "bearish": "▼ Bearish", "neutral": "• Neutral"}
+
+
+def _pct(x: float | None, digits: int = 1, signed: bool = False) -> str:
+    if x is None:
+        return "n/a"
+    return f"{x:+.{digits}%}" if signed else f"{x:.{digits}%}"
+
+
+def _price(x: float | None) -> str:
+    return "n/a" if x is None else f"{'-' if x < 0 else ''}${abs(x):.2f}"
+
+
+def _play_text(play: dict[str, Any]) -> str:
+    legs = " + ".join(f"${leg['strike']:g} {leg['type']}" for leg in play["legs"])
+    return legs if play["kind"] == "OTM" else f"{play['kind']}: {legs}"
+
+
+def _research_note(note: dict[str, Any]) -> str:
+    points = "".join(f"<li>{escape(x)}</li>" for x in note.get("points", []))
+    sources = "".join(f'<li><a href="{escape(s["url"])}">{escape(s["title"])}</a></li>' for s in note.get("sources", []))
+    return (
+        f'<div class="review"><b>Claude&#39;s research note ({_day(note["written"])}): {escape(note["view"])}.</b> '
+        f'{escape(note["summary"])}{f"<ul>{points}</ul>" if points else ""}'
+        f'{f"<details><summary>Sources</summary><ul>{sources}</ul></details>" if sources else ""}</div>'
+    )
+
+
+def _plays_table(o: dict[str, Any]) -> str:
+    if not o["plays"]:
+        if o["implied_move"] is None:
+            return '<p class="muted small">No option expiry falls close enough after the report to isolate it.</p>'
+        return '<p class="muted small">No out-of-the-money contract fits the budget and liquidity limits.</p>'
+    rows = "".join(
+        f'<tr><td>{escape(_play_text(p))}</td><td class="num">{_money(p["cost"], False)}</td>'
+        f'<td class="num">{" / ".join(f"{leg['delta']:+.2f}" for leg in p["legs"])}</td>'
+        f'<td class="num">{_pct(p["breakeven_move"], signed=True)}</td>'
+        f'<td class="num">{p["wins"]} of {p["tests"]}</td>'
+        f'<td class="num">{"n/a" if p["avg_result"] is None else _signed(p["avg_result"], False)}</td></tr>'
+        for p in o["plays"]
+    )
+    edge = any((p["avg_result"] or 0) > 0 for p in o["plays"])
+    return (
+        f'<h4>Out-of-the-money plays, {_day(o["expiry"])} expiry</h4>'
+        '<div class="scroll"><table><thead><tr><th>Position</th><th>Cost</th><th>Delta</th><th>Breakeven</th>'
+        f'<th>Paid off in past reports</th><th>Average result</th></tr></thead><tbody>{rows}</tbody></table></div>'
+        '<p class="muted small">Tested by applying each past report&#39;s move to today&#39;s price and holding to '
+        f'expiry (intrinsic value only).{"" if edge else " None of these would have made money on average."}</p>'
+    )
+
+
+def _history_table(o: dict[str, Any]) -> str:
+    if not o["history"]:
+        return ""
+    rows = "".join(
+        f'<tr><td>{_day(h["date"])}</td><td class="num">{_price(h["estimate"])}</td>'
+        f'<td class="num">{_price(h["actual"])}</td>'
+        f'<td class="num">{"n/a" if h["surprise"] is None else f"{h['surprise']:+.1f}%"}</td>'
+        f'<td class="num">{_pct(h["move"], signed=True)}</td></tr>'
+        for h in reversed(o["history"])
+    )
+    return ('<h4>Past reports</h4><div class="scroll"><table><thead><tr><th>Date</th><th>EPS estimate</th>'
+            f'<th>Reported</th><th>Surprise</th><th>Stock reaction</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
+def _earnings_card(o: dict[str, Any], note: dict[str, Any] | None) -> str:
+    factors = "".join(
+        f'<li>{"▲" if f["points"] > 0 else "▼" if f["points"] < 0 else "•"} <b>{escape(f["name"])} '
+        f'({f["points"]:+.0f})</b>: {escape(f["text"])}</li>'
+        for f in o["factors"]
+    )
+    pricing = (f'<h4>Options pricing: {escape(o["pricing"]["verdict"])}</h4>'
+               f'<p class="small">{escape(o["pricing"]["text"])}, on the {_day(o["expiry"])} expiry.</p>'
+               if o["pricing"] else "")
+    return (
+        f'<article class="card" id="earn-{escape(o["ticker"])}"><header><h3>{escape(o["ticker"])} · '
+        f'{_day(o["date"])}, {escape(o["timing"])}</h3><div class="pl">{LEANS[o["lean"]]} {o["score"]:+.0f}</div></header>'
+        '<div class="facts">'
+        f'<div><span>Chance of beating EPS</span><b>{_pct(o["beat_probability"], 0)}</b></div>'
+        f'<div><span>EPS estimate</span><b>{_price(o["eps_estimate"])}</b></div>'
+        f'<div><span>Implied move</span><b>{_pct(o["implied_move"])}</b></div>'
+        f'<div><span>Typical move</span><b>{_pct(o["historical_move"])}</b></div></div>'
+        f'{_research_note(note) if note else ""}'
+        f'<details><summary>Model, options and history</summary>'
+        f'<h4>Model factors: {o["score"]:+.0f} in total</h4><ul class="plain">{factors}</ul>'
+        f'{pricing}{_plays_table(o)}{_history_table(o)}</details></article>'
+    )
+
+
+def render_earnings(result: dict[str, Any], cfg: dict[str, Any]) -> str:
+    outlooks = sorted((r["earnings_outlook"] for r in result["tickers"].values() if r.get("earnings_outlook")),
+                      key=lambda o: (o["date"], o["ticker"]))
+    research = earnings.notes()
+    rows = []
+    for o in outlooks:
+        best = o["plays"][0] if o["plays"] else None
+        note = research.get(o["ticker"])
+        rows.append(
+            "<tr>" + _cell(o["date"], _day(o["date"])) + _cell(o["timing"], escape(o["timing"]), False)
+            + _cell(o["ticker"], f'<a href="#earn-{escape(o["ticker"])}">{escape(o["ticker"])}</a>', False)
+            + _cell(o["score"], f'{LEANS[o["lean"]][0]} {o["score"]:+.0f}')
+            + _cell(o["beat_probability"] or "", _pct(o["beat_probability"], 0))
+            + _cell(o["implied_move"] or "", _pct(o["implied_move"]))
+            + _cell(o["historical_move"] or "", _pct(o["historical_move"]))
+            + _cell(o["pricing"]["ratio"] if o["pricing"] else "",
+                    escape(o["pricing"]["verdict"]) if o["pricing"] else "n/a", False)
+            + _cell(best["avg_result"] if best else "", escape(_play_text(best)) if best else "none", False)
+            + _cell(note["view"] if note else "", escape(note["view"]) if note else "—", False) + "</tr>"
+        )
+    heads = ["Date", "Timing", "Ticker", "Model lean", "Beat chance", "Implied move", "Typical move", "Options",
+             "Best tested play", "Research view"]
+    table = (
+        '<div class="panel scroll"><table class="sortable"><thead><tr>' + "".join(f"<th>{h}</th>" for h in heads)
+        + f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+        if rows else f'<p class="muted">No stock in the universe reports in the next {cfg["earnings_window_days"]} days.</p>'
+    )
+    cards = "".join(_earnings_card(o, research.get(o["ticker"])) for o in outlooks)
+    method = [
+        "The model lean (−100 to +100) adds up: the record against EPS estimates over the last 8 reports, the "
+        "90-day change in the consensus estimate and recent revisions, expected revenue growth, the margin trend, "
+        "how the stock has reacted to past reports, a large run-up or sell-off into the date, and the current "
+        "market read. ±20 or more counts as a lean.",
+        "Beat chance starts from the stock's own beat rate, pulled toward the roughly 70% norm for large companies, "
+        "and is nudged by estimate revisions. Beating estimates does not mean the stock rises.",
+        "Implied move is the at-the-money straddle on the first expiry after the report, divided by the price. "
+        "Typical move is the average close-to-close reaction over the last 8 reports. Options are cheap below "
+        "0.85x the typical move and rich above 1.2x. Rich options usually lose value after the report "
+        "(volatility crush) even when the stock moves.",
+        "Plays are out-of-the-money contracts on that expiry in the lean's direction (both sides when there is no "
+        "lean, plus a strangle when options are also cheap), within the per-trade budget. Each is tested against "
+        "this stock's last 8 reactions, which is a small sample.",
+        "Research notes are written by Claude from public sources on the date shown and are not refreshed "
+        "automatically.",
+    ]
+    body = f"""<h2>Upcoming reports</h2>{table}
+<h2>By company</h2><div class="cards">{cards}</div>
+<h2>How the outlook works</h2><div class="panel"><ul>{"".join(f"<li>{escape(m)}</li>" for m in method)}</ul></div>"""
+    sub = (f"Stocks in the scan universe reporting in the next {cfg['earnings_window_days']} days. "
+           f"Last scan {_when(result['scanned_at'].isoformat())} ET.")
+    return _page("Earnings", sub, body, TABLE_JS)
+
+
 def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(render(state, cfg), encoding="utf-8")
     if result is not None:
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")
+        OUT.with_name("earnings.html").write_text(render_earnings(result, cfg), encoding="utf-8")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:

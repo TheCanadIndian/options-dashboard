@@ -1,0 +1,486 @@
+{
+ "NKE": {
+  "view": "Neutral",
+  "summary": "Reports tonight against a low bar. The stock sits near a 12-year low and was downgraded to Underperform days before the print, but tariff costs cap the upside on margins.",
+  "points": [
+   "Consensus near $11.3B revenue and $0.44 EPS, against $11.7B and $0.49 a year ago.",
+   "Management guided revenue down low-to-mid single digits with gross margin slightly positive.",
+   "Incremental tariff costs now estimated at about $1.5B a year, up from about $1B; last quarter's tariff recovery does not repeat."
+  ],
+  "sources": [
+   {
+    "title": "Nike announces Q1 FY2027 earnings date (Barchart)",
+    "url": "https://www.barchart.com/story/news/4328265/nike-inc-announces-first-quarter-fiscal-2027-earnings-and-conference-call"
+   },
+   {
+    "title": "Nike earnings preview (ts2.tech)",
+    "url": "https://ts2.tech/?p=21263984"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "APLD": {
+  "view": "Neutral, high risk",
+  "summary": "A history of very large beats against a consensus that has drifted lower, but the stock moves about 14% on reports and the current market read is bearish.",
+  "points": [
+   "Beat EPS estimates in 7 of the last 8 reports; last quarter's revenue came in far above estimates.",
+   "Consensus for the quarter is a loss of about $0.20 to $0.30 a share on roughly $115M revenue.",
+   "Options price a move a little smaller than the stock usually makes."
+  ],
+  "sources": [
+   {
+    "title": "Applied Digital beat estimates by 61% last quarter (TIKR)",
+    "url": "https://www.tikr.com/es/blog/applied-digital-beat-estimates-by-61-last-quarter-and-the-market-still-has-not-fully-noticed"
+   },
+   {
+    "title": "APLD smashes revenue estimates (TipRanks)",
+    "url": "https://tipranks.com/news/apld-earnings-applied-digital-smashes-revenue-estimates"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "PEP": {
+  "view": "Neutral",
+  "summary": "An easy comparison against a soft Q3 2025, but management has pointed to the low end of full-year guidance. A small mover.",
+  "points": [
+   "Consensus about $25.0B revenue (+4.9%) and $2.28 EPS (+0.6%).",
+   "Full-year guide: organic revenue +2% to +4%, core constant-currency EPS +4% to +6%, likely at the low end.",
+   "Typical reaction about 4%, and options price about the same."
+  ],
+  "sources": [
+   {
+    "title": "PepsiCo Q3 2026 earnings preview (Hudson Labs)",
+    "url": "https://hudson-labs.com/research/pepsico-q3-2026-earnings-pep-revenue-and-outlook"
+   },
+   {
+    "title": "PepsiCo Q2 2026 results (SEC 8-K)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0000077476/000007747626000037/q220268-kxexhibit991.htm"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "DAL": {
+  "view": "Bullish on results",
+  "summary": "Guidance is solid and the beat record strong. Fuel prices are the main swing factor for the outlook, which usually moves the stock more than the quarter itself.",
+  "points": [
+   "Q3 guide: EPS $2.00 to $2.50 on revenue up mid-teens percent.",
+   "Full-year adjusted EPS guide of $6.50 to $7.50 affirmed.",
+   "Options price about the stock's typical 7% move."
+  ],
+  "sources": [
+   {
+    "title": "Delta affirms FY26 outlook (Nasdaq)",
+    "url": "https://www.nasdaq.com/articles/delta-air-lines-affirms-fy26-outlook-update"
+   },
+   {
+    "title": "Late-summer 2026 airline scorecard (Merlin Trader)",
+    "url": "https://www.merlintrader.com/airlines-late-summer-2026-aal-dal-ual-fall-winter-outlook/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "UAL": {
+  "view": "Neutral",
+  "summary": "Guidance was cut in July and the Q3 range is wide. The model sees no edge either way.",
+  "points": [
+   "Q3 EPS guide $2.50 to $3.50 against a $3.18 consensus at the time.",
+   "Full-year EPS outlook lowered from $9 to $11."
+  ],
+  "sources": [
+   {
+    "title": "United Airlines earnings forecasts (Benzinga)",
+    "url": "https://www.benzinga.com/quote/UAL/earnings-forecasts"
+   },
+   {
+    "title": "Late-summer 2026 airline scorecard (Merlin Trader)",
+    "url": "https://www.merlintrader.com/airlines-late-summer-2026-aal-dal-ual-fall-winter-outlook/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "AAL": {
+  "view": "Bearish lean",
+  "summary": "The weakest of the three big airlines: strong revenue growth still comes with an expected adjusted loss, and guidance has been cut.",
+  "points": [
+   "Q3 outlook: revenue up 16% to 19% with an adjusted loss.",
+   "Full-year EPS guide cut to -$0.65 to +$0.65."
+  ],
+  "sources": [
+   {
+    "title": "American Airlines posts 88% profit drop in Q2 (InsideFlyer)",
+    "url": "https://www.insideflyer.com/posts/american-airlines-posts-88-profit-drop-in-q2/"
+   },
+   {
+    "title": "Late-summer 2026 airline scorecard (Merlin Trader)",
+    "url": "https://www.merlintrader.com/airlines-late-summer-2026-aal-dal-ual-fall-winter-outlook/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "JPM": {
+  "view": "Bullish on results",
+  "summary": "Management has already pointed to strong investment banking and markets revenue. Options are expensive against the stock's small typical move, so buying calls has a poor record.",
+  "points": [
+   "Expects Q3 investment banking fees and markets revenue up mid-to-high teens percent year over year.",
+   "Some quarter-to-date capital markets indicators reportedly tracked below expectations across the industry.",
+   "Typical reaction only about 2.6%."
+  ],
+  "sources": [
+   {
+    "title": "JPMorgan expects Q3 IB fees and markets revenue to rise (Pulse 2.0)",
+    "url": "https://pulse2.com/jpmorgan-expects-q3-investment-banking-fees-and-markets-revenue-to-rise-mid-to-high-teens/amp/"
+   },
+   {
+    "title": "Wall Street's biggest banks are riding high as earnings season begins",
+    "url": "https://www.thewealthadvisor.com/article/wall-streets-biggest-banks-are-riding-high-earnings-season-begins"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "C": {
+  "view": "Neutral to bullish",
+  "summary": "Benefits from the same capital markets backdrop as its peers, with a more balanced business mix. The model lean is mild.",
+  "points": [
+   "Analysts expect investment banking and trading to grow for a seventh straight quarter at most large banks.",
+   "Large-bank profits expected up about 6% year over year."
+  ],
+  "sources": [
+   {
+    "title": "US banks to reap bigger profits as deals rebound (Gazette)",
+    "url": "https://gazette.com/?p=1493421"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "WFC": {
+  "view": "Neutral to bullish",
+  "summary": "Less exposed to the investment banking rebound than its peers, so its results lean on lending and deposits.",
+  "points": [
+   "Has a smaller, younger Wall Street division than the other large banks.",
+   "Options price about the stock's typical move."
+  ],
+  "sources": [
+   {
+    "title": "US banks to reap bigger profits as deals rebound (Gazette)",
+    "url": "https://gazette.com/?p=1493421"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "MS": {
+  "view": "Bullish on results",
+  "summary": "The model's strongest lean. Wealth management cushions any softness in deals and trading.",
+  "points": [
+   "Beat record and estimate revisions are both strong.",
+   "Among the most exposed to investment banking and trading, so a softer quarter-to-date tape is the risk."
+  ],
+  "sources": [
+   {
+    "title": "Investment banking surge: Morgan Stanley solidifies Wall Street revival",
+    "url": "https://www.thewealthadvisor.com/article/investment-banking-surge-morgan-stanley-solidifies-wall-street-revival"
+   },
+   {
+    "title": "Wall Street's biggest banks are riding high as earnings season begins",
+    "url": "https://www.thewealthadvisor.com/article/wall-streets-biggest-banks-are-riding-high-earnings-season-begins"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "BAC": {
+  "view": "Bullish on results",
+  "summary": "Beat estimates in all of the last 8 reports and net interest income is guided higher. The stock fell about 14% over the past month, which lowers the bar.",
+  "points": [
+   "2026 net interest income growth guided at 6% to 8%, with the CFO pointing to the upper end.",
+   "Typical reaction only about 2%; out-of-the-money calls would have lost money after all of the last 8 reports."
+  ],
+  "sources": [
+   {
+    "title": "BofA CFO expects NII at upper end of 6-8% guidance (Newsquawk)",
+    "url": "https://www.newsquawk.com/headlines/bank-of-america-bac-cfo-expects-net-interest-income-to-be-at-the-upper-end-of-the-6-to-8-guidance-range"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "TSM": {
+  "view": "Bullish on results",
+  "summary": "Guidance implies very strong growth, and monthly sales reports usually reveal most of the revenue line before the call. The risk is the stock's reaction after a 10% run-up.",
+  "points": [
+   "Q3 revenue guide $44.6B to $45.8B, gross margin 65% to 67%.",
+   "Raised its 2026 growth forecast to over 40% in US dollar terms.",
+   "September sales are due around Oct 10, before the report."
+  ],
+  "sources": [
+   {
+    "title": "TSMC projects Q3 revenue $44.6B to $45.8B (ScanX)",
+    "url": "https://scanx.trade/stock-market-news/companies/tsmc-projects-q3-revenue-between-44-6b-and-45-8b/45732056"
+   },
+   {
+    "title": "TSMC forecasts 2026 revenue growth over 40% (KuCoin News)",
+    "url": "https://www.kucoin.com/news/flash/tsmc-forecasts-strong-q3-demand-2026-revenue-growth-to-exceed-40"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "ASML": {
+  "view": "Bullish on results, mixed on reaction",
+  "summary": "Guidance was raised in July and estimates are up 26% in 90 days. But the stock fell after 4 of its last 8 beats; bookings and 2027 commentary drive the reaction.",
+  "points": [
+   "Q3 guide: sales EUR 11.0B to 12.0B, gross margin 55% to 57%.",
+   "2026 sales guide raised to EUR 43B to 45B."
+  ],
+  "sources": [
+   {
+    "title": "ASML Q2 2026 financial results",
+    "url": "https://www.asml.com/news/press-releases/2026/q2-2026-financial-results"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "LRCX": {
+  "view": "Bullish on results",
+  "summary": "Guided well above consensus in July on memory and AI demand, and options price about a normal move. One of the cleaner setups on the list, though its options cost more than the per-trade budget.",
+  "points": [
+   "September-quarter guide: revenue $8.1B plus or minus $0.4B and EPS $2.15 plus or minus $0.15, roughly 14% and 18% above consensus at the time.",
+   "Raised its 2026 wafer fab equipment outlook to the low $150B range."
+  ],
+  "sources": [
+   {
+    "title": "Lam Research Q4 FY2026 results (SEC 8-K)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0000707549/000070754926000033/lrcx_exhibitx991xq4x2026.htm"
+   },
+   {
+    "title": "Lam Research Q4 earnings call highlights (MarketBeat)",
+    "url": "https://www.marketbeat.com/instant-alerts/lam-research-q4-earnings-call-highlights-2026-07-29/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "UNH": {
+  "view": "Neutral to bullish",
+  "summary": "The July beat and guidance raise reset expectations higher, and medical cost trend is still the swing factor. Options price a smaller move than usual.",
+  "points": [
+   "Q2 adjusted EPS of $6.38 beat by about $1.50; full-year guide raised to $19.50 to $20.",
+   "Commercial medical cost trend remains above the roughly 11% assumption, and Medicaid margins stay pressured."
+  ],
+  "sources": [
+   {
+    "title": "UnitedHealth boosts 2026 guidance (Bloomberg Law)",
+    "url": "https://news.bloomberglaw.com/insurance/unitedhealth-boosts-2026-guidance-on-wide-ranging-recovery"
+   },
+   {
+    "title": "UnitedHealth gets a clean bill of health (Briefing.com)",
+    "url": "https://www.briefing.com/story-stocks/archive/2026/7/16/unitedhealth-gets-a-clean-bill-of-health-with-big-earnings-beat-and-guidance-raise"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "CLF": {
+  "view": "Bullish",
+  "summary": "Q3 was guided to more than double on higher steel prices, and options price a smaller move than the stock usually makes. One of the few names where options look cheap.",
+  "points": [
+   "Q3 adjusted EBITDA guide about $575M, against $286M in Q2 (its best quarter in two years).",
+   "Average selling price rose to $1,124 a ton as Section 232 tariffs and tight supply lift US steel prices."
+  ],
+  "sources": [
+   {
+    "title": "Cleveland-Cliffs offers bright Q3 2026 outlook (Manufacturing Dive)",
+    "url": "https://manufacturingdive.com/news/cleveland-cliffs-offers-bright-q3-2026-outlook-despite-maintenance-outages/826130"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "EQT": {
+  "view": "Neutral",
+  "summary": "Production is strong but weak natural gas prices hold back earnings; realised prices will decide the quarter.",
+  "points": [
+   "Q3 sales volume guide 570 to 620 Bcfe; full-year volume guidance raised.",
+   "NYMEX gas averaged $2.89 last quarter against $3.43 a year earlier."
+  ],
+  "sources": [
+   {
+    "title": "EQT Q2 2026 results (SEC 8-K)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0000033213/000003321326000041/ex9916302026earningsrelease.htm"
+   },
+   {
+    "title": "EQT reports inline Q2 2026 earnings (Chartmill)",
+    "url": "https://www.chartmill.com/news/EQT/Chartmill-51303-EQT-Corp-NYSEEQT-Reports-Inline-Q2-2026-Earnings-as-Natural-Gas-Headwinds-Persist"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "GM": {
+  "view": "Bullish",
+  "summary": "Guidance has been raised twice this year and tariff costs revised lower, while options price a smaller move than usual.",
+  "points": [
+   "2026 adjusted EBIT guide raised to $14B to $16B and adjusted EPS to $12 to $14.",
+   "Gross tariff impact cut to $3.5B to $4.5B."
+  ],
+  "sources": [
+   {
+    "title": "General Motors raises 2026 adjusted EBIT and EPS guidance (Nasdaq)",
+    "url": "https://nasdaq.com/articles/general-motors-raises-2026-adj-ebit-adj-eps-guidance"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "NFLX": {
+  "view": "Neutral",
+  "summary": "Q3 guidance implied slower growth and the stock is down about 18% over the past month. The model sees no clear edge.",
+  "points": [
+   "Q3 guide: revenue up 12% (11% at constant currency) with a 33.2% operating margin.",
+   "Consensus EPS about $0.82; estimates slipped 2% over 90 days."
+  ],
+  "sources": [
+   {
+    "title": "Netflix Q2 2026 shareholder letter (SEC 8-K)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001065280/000106528026000211/ex991_q226.htm"
+   },
+   {
+    "title": "Netflix to announce Q3 2026 results",
+    "url": "https://s22.q4cdn.com/959853165/files/doc_news/Netflix-to-Announce-Third-Quarter-2026-Financial-Results-2026.pdf"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "IBM": {
+  "view": "Neutral",
+  "summary": "Revenue growth slowed sharply last quarter on lumpy infrastructure deals while software held up. Options look a little expensive.",
+  "points": [
+   "Q2 revenue growth slowed to about 1%; software annual recurring revenue reached $24.6B, up 8%.",
+   "Full-year revenue growth guide of 4% to 5% maintained, with software at 6% to 8%."
+  ],
+  "sources": [
+   {
+    "title": "IBM earnings (fn2.ai)",
+    "url": "https://fn2.ai/earnings/ibm/2026-q2"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "T": {
+  "view": "Bullish lean, options expensive",
+  "summary": "A steady reporter that rose after 7 of its last 8 reports, but options price about 1.4 times its usual move, so calls have rarely paid.",
+  "points": [
+   "Beat EPS estimates in 7 of the last 8 reports.",
+   "Fiber and wireless bundling has driven recent subscriber growth."
+  ],
+  "sources": [
+   {
+    "title": "AT&T Q1 2026 wireless subscribers (Quartz)",
+    "url": "https://qz.com/att-q1-2026-wireless-subscribers-earnings-bundle-042226"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "TSLA": {
+  "view": "Bearish",
+  "summary": "The weakest setup on the list: a poor recent beat record, estimates cut sharply and thin margins. The stock trades on narrative, so the reaction can ignore the numbers.",
+  "points": [
+   "Consensus EPS was cut about 19% over 90 days, with 15 downward revisions in the last month.",
+   "Q3 delivery estimates of about 461K to 470K compare with 480K in Q2. Tesla usually reports deliveries in the first days of October, before earnings.",
+   "Options price a smaller move than the stock usually makes."
+  ],
+  "sources": [
+   {
+    "title": "Tesla deliveries in Q3 (Octagon)",
+    "url": "https://octagonai.co/markets/financials/companies/tesla-deliveries-in-q3/"
+   },
+   {
+    "title": "Tesla's earnings setup: most of the good news is already out (Nasdaq)",
+    "url": "https://www.nasdaq.com/articles/teslas-earnings-setup-most-good-news-already-out"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "CMCSA": {
+  "view": "Bearish lean on subscribers",
+  "summary": "The CFO has already warned that broadband losses will be worse than a year ago, which lowers the bar but keeps sentiment weak.",
+  "points": [
+   "Q3 broadband subscriber losses expected to exceed the 91K lost in Q3 2025, blamed on low-priced fiber competition.",
+   "Management still expects a better full year for broadband losses."
+  ],
+  "sources": [
+   {
+    "title": "Comcast expecting more broadband losses than last year for Q3 (Broadband Breakfast)",
+    "url": "https://broadbandbreakfast.com/comcast-expecting-more-broadband-losses-than-last-year-for-q3/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "F": {
+  "view": "Bullish on results",
+  "summary": "Estimates have risen sharply (14 upward revisions against 1 down) after a July beat and guidance raise, and the stock fell about 14% over the past month.",
+  "points": [
+   "Q2 adjusted EPS of $0.42 beat the $0.35 forecast; full-year adjusted EBIT guide raised to $10B to $11B.",
+   "US sales were down 9.6% in the first half on production disruption; net tariff cost about $1B for the year."
+  ],
+  "sources": [
+   {
+    "title": "Ford lifts annual guidance (BNN Bloomberg)",
+    "url": "https://bnnbloomberg.ca/business/company-news/2026/07/28/ford-lifts-annual-guidance-citing-strong-pricing-and-resilient-consumer"
+   },
+   {
+    "title": "Ford raises 2026 profit outlook (CBT News)",
+    "url": "https://www.cbtnews.com/ford-raises-2026-profit-outlook/"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "FCX": {
+  "view": "Neutral",
+  "summary": "Record copper prices help, but the Grasberg bottleneck limits volumes for the rest of the year.",
+  "points": [
+   "Q2 EPS of $0.68 beat $0.60 on a realised copper price of $6.17/lb, against $4.54 a year earlier.",
+   "Grasberg output limited to about 60,000 t/d in the second half, against a prior 100,000 t/d target."
+  ],
+  "sources": [
+   {
+    "title": "Freeport earnings (fn2.ai)",
+    "url": "https://fn2.ai/earnings/fcx"
+   },
+   {
+    "title": "Freeport beats profit forecasts despite Grasberg slump (Mining.com)",
+    "url": "https://www.mining.com/?p=1211224"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "INTC": {
+  "view": "Bullish on numbers, stretched",
+  "summary": "Guided well above consensus in July and estimates have caught up, but the stock is up about 33% in 20 days, so a beat may already be priced in.",
+  "points": [
+   "Q3 guide: EPS $0.38 (consensus was $0.24) on revenue of $15.8B to $16.8B.",
+   "30 upward and no downward estimate revisions in the last 30 days."
+  ],
+  "sources": [
+   {
+    "title": "Intel updates Q3 2026 guidance (MarketBeat)",
+    "url": "https://www.marketbeat.com/instant-alerts/intel-nasdaqintc-updates-q3-2026-earnings-guidance-2026-07-23/"
+   },
+   {
+    "title": "Intel reports Q2 2026 results",
+    "url": "https://www.intc.com/news-events/press-releases/detail/1776/intel-reports-second-quarter-2026-financial-results"
+   }
+  ],
+  "written": "2026-10-01"
+ },
+ "NOK": {
+  "view": "Neutral",
+  "summary": "The business is improving on AI and optical demand, but the model's bearish lean comes from weak price action. Options price more than the stock's usual move.",
+  "points": [
+   "Q2 Network Infrastructure sales up 12%, with sales to AI and cloud customers up 105%.",
+   "Expects full-year comparable operating profit somewhat above the midpoint of EUR 2.0B to 2.5B."
+  ],
+  "sources": [
+   {
+    "title": "Nokia Q2 FY2026: optical strength (Futurum)",
+    "url": "https://futurumgroup.com/insights/nokia-q2-fy-2026-optical-strength-positions-nokia-for-the-ai-buildout/"
+   },
+   {
+    "title": "Nokia post-Q2 2026 consensus",
+    "url": "https://www.nokia.com/sites/default/files/2026-08/nokia-post-q2-2026-consensus.pdf"
+   }
+  ],
+  "written": "2026-10-01"
+ }
+}

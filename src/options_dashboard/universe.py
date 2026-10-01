@@ -136,14 +136,16 @@ def _liquidity(symbol: str) -> dict[str, Any] | None:
         return None
     by_expiry = near.groupby("expiration")["openInterest"].sum()
     expiry = str(by_expiry.idxmax())
-    spreads = []
+    spreads, widths = [], []
     for kind in ("call", "put"):
         side = chain[(chain["expiration"] == expiry) & (chain["type"] == kind)]
         atm = side.assign(gap=(side["strike"] - spot).abs()).nsmallest(2, "gap")
         quoted = atm[(atm["bid"] > 0) & (atm["ask"] > 0)]
         mid = (quoted["bid"] + quoted["ask"]) / 2
         spreads += list(((quoted["ask"] - quoted["bid"]) / mid * 100).round(2))
+        widths += list((quoted["ask"] - quoted["bid"]).round(2))
     return {"oi": float(by_expiry.sum()), "spread": float(np.median(spreads)) if spreads else None,
+            "width": float(np.median(widths)) if widths else None,
             "price": float(spot), "expiry": expiry}
 
 
@@ -157,12 +159,20 @@ def load() -> dict[str, Any]:
 
 
 def _market_settled() -> bool:
-    """Option quotes are representative from 15 minutes after the open until the close.
+    """Option quotes are representative from an hour after the open until the close.
 
-    Outside that window Cboe still shows quotes, but market makers widen them.
+    Opening spreads are still wide (a 9:51 build dropped AAPL and AMZN), and after the
+    close Cboe still shows quotes but market makers widen them.
     """
     now = datetime.now(NEW_YORK)
-    return now.weekday() < 5 and clock(9, 45) <= now.time() <= clock(16, 0)
+    return now.weekday() < 5 and clock(10, 30) <= now.time() <= clock(16, 0)
+
+
+def _tight(liq: dict[str, Any], cfg: dict[str, Any]) -> bool:
+    """A tight market: a small spread in percent, or a penny-wide one on a cheap option."""
+    if liq["spread"] is None:
+        return False
+    return liq["spread"] <= cfg["universe_max_spread_pct"] or (liq.get("width") or 1) <= cfg["universe_max_spread_width"]
 
 
 def build(cfg: dict[str, Any], force: bool = False) -> dict[str, Any]:
@@ -197,7 +207,7 @@ def build(cfg: dict[str, Any], force: bool = False) -> dict[str, Any]:
     passed = [
         (liq["oi"], symbol) for symbol, liq in results.items()
         if liq and liq["oi"] >= cfg["universe_min_option_oi"]
-        and (not live or (liq["spread"] is not None and liq["spread"] <= cfg["universe_max_spread_pct"]))
+        and (not live or _tight(liq, cfg))
     ]
     keep = [s for _, s in sorted(passed, reverse=True)[: cfg["universe_size"]]]
     universe = {

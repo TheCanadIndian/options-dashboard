@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from . import config, data, greeks, structure, ta, universe
+from . import config, data, earnings, greeks, structure, ta, universe
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -116,6 +116,14 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
     result["over_budget"] = False
     result["chain_source"] = quote.get("source")
+    is_etf = universe.meta(ticker).get("kind") == "etf"
+    report = None if is_etf else data.next_earnings(ticker)
+    result["earnings"], result["earnings_outlook"] = report, None
+    if report and 0 <= (report - date.today()).days <= cfg["earnings_window_days"]:
+        try:
+            result["earnings_outlook"] = earnings.outlook(ticker, report, None, ind, score, chain, spot, rate, cfg)
+        except Exception as exc:  # one ticker's missing financials must not sink its scan
+            result["earnings_error"] = f"{type(exc).__name__}: {exc}"
     if direction == "neutral" or chain is None or chain.empty:
         return result
     side = "call" if direction == "bullish" else "put"
@@ -141,7 +149,6 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     if df.empty:
         return result
 
-    is_etf = universe.meta(ticker).get("kind") == "etf"
     q = data.dividend_yield(ticker)
     is_call = (df["type"] == "call").to_numpy()
     T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
@@ -191,12 +198,10 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         df[f"pts_{k}"] = np.round(WEIGHTS[k] * parts[k], 1)
     df["score"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)
 
-    earnings = None if is_etf else data.next_earnings(ticker)
     df["earnings_before_expiry"] = (
-        pd.to_datetime(df["expiration"]).dt.date >= earnings if earnings else False
+        pd.to_datetime(df["expiration"]).dt.date >= report if report else False
     )
     df["ticker"], df["spot"], df["trend"], df["bias"] = ticker, spot, score, direction
-    result["earnings"] = earnings
     result["contracts"] = df[COLUMNS].sort_values("score", ascending=False).reset_index(drop=True)
     return result
 
