@@ -27,7 +27,9 @@ st.set_page_config(page_title="Options Dashboard", page_icon="📈", layout="wid
 
 @st.cache_data(ttl=900, show_spinner=False)
 def run_scan(scan_cfg_json: str) -> dict:
-    return scanner.scan(json.loads(scan_cfg_json))
+    # The JSON holds only the settings the sidebar can change (it doubles as the cache key);
+    # everything else comes from the saved settings and defaults.
+    return scanner.scan({**config.load(), **json.loads(scan_cfg_json)})
 
 
 def sidebar(cfg: dict) -> dict:
