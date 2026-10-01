@@ -19,9 +19,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time as clock, timedelta
 from typing import Any
@@ -38,7 +35,7 @@ from .config import STATE_DIR
 
 FILE = STATE_DIR / "universe.json"
 NEW_YORK = ZoneInfo("America/New_York")
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
+HEADERS = data.CBOE_HEADERS  # Nasdaq and OCC refuse requests without a browser user agent
 
 # Used only by the Yahoo fallback, which covers stocks alone.
 ETFS = [
@@ -126,55 +123,18 @@ def _candidates_yahoo(cfg: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], s
 
 # ---------------------------------------------------------------- liquidity
 
-_OPTION = re.compile(r"^(?P<root>.+?)(?P<exp>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
-_cboe_lock = threading.Lock()
-_cboe_next = 0.0
-CBOE_PER_SECOND = 2.0  # four a second in bursts drew 429s
-
-
-def _cboe_slot(backoff: float = 0.0) -> None:
-    global _cboe_next
-    with _cboe_lock:
-        now = time.monotonic()
-        if backoff:
-            _cboe_next = max(_cboe_next, now + backoff)
-        wait = max(0.0, _cboe_next - now)
-        _cboe_next = max(now, _cboe_next) + 1.0 / CBOE_PER_SECOND
-    time.sleep(wait)
-
-
-def cboe_chain(symbol: str) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Every listed contract for a symbol from Cboe's delayed quotes, plus the underlying's quote."""
-    for attempt in range(4):
-        _cboe_slot()
-        r = requests.get(f"https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json",
-                         headers=HEADERS, timeout=30)
-        if r.status_code != 429 or attempt == 3:
-            break
-        _cboe_slot(backoff=10.0 * 2**attempt)
-    r.raise_for_status()
-    body = r.json()["data"]
-    df = pd.DataFrame(body["options"])
-    parts = df["option"].str.extract(_OPTION)
-    df["expiration"] = pd.to_datetime(parts["exp"], format="%y%m%d").dt.strftime("%Y-%m-%d")
-    df["type"] = parts["cp"].map({"C": "call", "P": "put"})
-    df["strike"] = parts["strike"].astype(float) / 1000
-    quote = {k: body.get(k) for k in ("current_price", "close", "iv30", "iv30_change", "last_trade_time")}
-    return df.dropna(subset=["type"]), quote
-
-
 def _liquidity(symbol: str) -> dict[str, Any] | None:
     """Near-the-money open interest 7 to 60 days out, and the at-the-money spread on the
     expiry in that window with the most open interest (usually the monthly)."""
-    chain, quote = cboe_chain(symbol)
-    spot = quote["current_price"] or quote["close"]
+    chain, quote = data.cboe_chain(symbol)  # Cboe only: the Yahoo fallback would cost a request per expiry
+    spot = quote["price"]
     if not spot or chain.empty:
         return None
     days = (pd.to_datetime(chain["expiration"]) - pd.Timestamp(date.today())).dt.days
     near = chain[days.between(7, 60) & chain["strike"].between(spot * 0.9, spot * 1.1)]
     if near.empty:
         return None
-    by_expiry = near.groupby("expiration")["open_interest"].sum()
+    by_expiry = near.groupby("expiration")["openInterest"].sum()
     expiry = str(by_expiry.idxmax())
     spreads = []
     for kind in ("call", "put"):

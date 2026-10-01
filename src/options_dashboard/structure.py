@@ -344,17 +344,6 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
                 vanna_flow=vanna_flow, charm_flow=charm_flow)
 
 
-def atm_iv(chain: pd.DataFrame, spot: float) -> float | None:
-    """Median implied volatility of the strikes nearest the money, a week or more out."""
-    days = (pd.to_datetime(chain["expiration"]) - pd.Timestamp(date.today())).dt.days
-    df = chain[(days >= 7) & (chain["impliedVolatility"] > 0.03) & (chain["impliedVolatility"] < 5)]
-    if df.empty:
-        return None
-    df = df[df["expiration"] == df["expiration"].min()]
-    nearest = df.assign(gap=(df["strike"] - spot).abs()).nsmallest(6, "gap")
-    return float(nearest["impliedVolatility"].median())
-
-
 # ---------------------------------------------------------------- composite
 
 def composite(parts: dict[str, dict[str, Any] | None]) -> float:

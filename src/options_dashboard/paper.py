@@ -38,20 +38,22 @@ def _save(trades: list[dict[str, Any]]) -> None:
 def _mark(trades: list[dict[str, Any]], now: str) -> int:
     """Re-price open trades from live quotes. Returns how many were updated."""
     open_trades = [t for t in trades if t["status"] == "open"]
-    groups: dict[tuple[str, str], list[dict]] = {}
+    groups: dict[str, list[dict]] = {}
     for t in open_trades:
         if date.fromisoformat(t["expiration"]) < date.today():
             t["status"] = "expired"
             continue
-        groups.setdefault((t["ticker"], t["expiration"]), []).append(t)
+        groups.setdefault(t["ticker"], []).append(t)
+    if not data.market_open():
+        return 0  # after-hours quotes are too wide to mark against
 
     marked, rows = 0, []
-    for (ticker, expiration), group in groups.items():
+    for ticker, group in groups.items():
         try:
-            quotes = data.quotes(ticker, expiration)
-            spot = data.spot_price(ticker, group[0]["last_spot"])
+            quotes, spot = data.option_quotes(ticker)
         except Exception:
             continue  # try again next scan
+        spot = spot or group[0]["last_spot"]
         for t in group:
             if t["symbol"] not in quotes.index:
                 continue
@@ -103,7 +105,7 @@ def update(result: dict[str, Any], cfg: dict[str, Any]) -> tuple[int, int]:
     trades = load()
     now = datetime.now().isoformat(timespec="seconds")
     marked = _mark(trades, now)
-    opened = _open_new(trades, result["contracts"], cfg, now)
+    opened = _open_new(trades, result["contracts"], cfg, now) if data.market_open() else 0
     _save(trades)
     return opened, marked
 

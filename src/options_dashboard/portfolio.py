@@ -91,18 +91,22 @@ def _close(state: dict[str, Any], pos: dict[str, Any], reason: str, now: str, cf
 
 
 def _manage(state: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
-    """Re-price open positions and sell any that hit the stop, target or time limit."""
-    groups: dict[tuple[str, str], list[dict]] = {}
-    for pos in state["positions"]:
-        groups.setdefault((pos["ticker"], pos["expiration"]), []).append(pos)
+    """Re-price open positions and sell any that hit the stop, target or time limit.
 
-    for (ticker, expiration), group in groups.items():
+    Only called during market hours: after the close quotes widen enough to fake a stop.
+    """
+    groups: dict[str, list[dict]] = {}
+    for pos in state["positions"]:
+        groups.setdefault(pos["ticker"], []).append(pos)
+
+    for ticker, group in groups.items():
         try:
-            quotes = data.quotes(ticker, expiration)
-            spot = data.spot_price(ticker, group[0]["last_spot"])
+            quotes, spot = data.option_quotes(ticker)
         except Exception:
             quotes, spot = None, None
+        spot = spot or group[0]["last_spot"]
         for pos in group:
+            expiration = pos["expiration"]
             live = False
             if quotes is not None and pos["symbol"] in quotes.index:
                 bid = float(quotes.at[pos["symbol"], "bid"])
@@ -235,6 +239,8 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
 def update(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     """Apply one scan to the portfolio: manage exits, then look for new buys."""
     state = load(cfg)
+    if not data.market_open():
+        return state  # option quotes outside the session are too wide to trade or value against
     now = datetime.now().isoformat(timespec="seconds")
     _manage(state, now, cfg)
     if _review_due(state, cfg):

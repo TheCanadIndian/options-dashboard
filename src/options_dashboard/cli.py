@@ -5,18 +5,11 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime, time as clock
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
-from . import alerts, config, paper, portfolio, scanner, site
+from . import alerts, config, data, paper, portfolio, scanner, site
 
-NEW_YORK = ZoneInfo("America/New_York")
-
-
-def market_open(now: datetime | None = None) -> bool:
-    """Regular US session, Monday to Friday. Exchange holidays are not checked."""
-    now = now or datetime.now(NEW_YORK)
-    return now.weekday() < 5 and clock(9, 30) <= now.time() <= clock(16, 0)
+market_open = data.market_open
 
 
 def run_once(send_alerts: bool, log_paper: bool) -> None:

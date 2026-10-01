@@ -22,11 +22,7 @@ WEIGHTS = {
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
-MAX_EXPIRIES = 4  # expiries sampled across the DTE window, to keep requests per ticker down
-# A 0.30-delta option three weeks out costs about 0.044 x spot x volatility (Black-Scholes,
-# T = 21/365). Set a little lower so the skip errs toward fetching. Only used to skip
-# tickers that cannot fit the budget.
-CHEAPEST_FACTOR = 0.04
+IV_CHANGE_MIN = 0.5  # vol points: a smaller move in 30-day IV is noise for the vanna read
 FULL_CONVICTION = 70  # composite score that earns all of the direction points
 
 COLUMNS = [
@@ -43,8 +39,8 @@ def _scale(x, best, worst):
     return np.clip((np.asarray(x, dtype=float) - worst) / (best - worst), 0.0, 1.0)
 
 
-def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict,
-                    spot: float, rate: float) -> dict:
+def _read_structure(ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float, rate: float,
+                    chain: pd.DataFrame | None, quote: dict[str, Any]) -> dict:
     """Run every method; one that lacks data or fails returns None and is left out."""
     def attempt(read):
         try:
@@ -53,19 +49,19 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
             return None
 
     def dealer_exposure():
-        chain = data.open_interest(ticker, GAMMA_MAX_DTE)
+        if chain is None or chain.empty:
+            return None
         adv_dollars = float(ind["Volume"].rolling(20).mean().iloc[-1]) * spot
-        # Vanna needs the direction of implied volatility. Use its day-over-day change when
-        # there is one on file, otherwise infer it from price: volatility falls as stocks rise.
-        level = structure.atm_iv(chain, spot)
-        change = data.iv_change(ticker, level) if level else None
-        if change is not None and abs(change) >= 0.005:
-            trend, note = (1 if change > 0 else -1), f"{change * 100:+.1f} points since the last session"
+        # Vanna needs the direction of implied volatility: Cboe's change in 30-day IV today,
+        # or when that is missing, the price move (volatility usually falls as stocks rise).
+        change = quote.get("iv30_change")
+        if change is not None and abs(change) >= IV_CHANGE_MIN:
+            trend, note = (1 if change > 0 else -1), f"30-day IV {change:+.1f} points today"
         else:
             week = spot / float(ind["Close"].iloc[-6]) - 1
             trend = 0 if abs(week) < 0.01 else (-1 if week > 0 else 1)
             note = f"inferred from the stock's {week:+.1%} move this week"
-        return structure.gamma(chain, spot, rate, adv_dollars, trend, note)
+        return structure.gamma(chain[chain["dte"] <= GAMMA_MAX_DTE], spot, rate, adv_dollars, trend, note)
 
     atr = float(ind["atr"].iloc[-1])
     return {
@@ -83,10 +79,14 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         bars = data.intraday(ticker)
     except Exception:
         bars = None
+    try:  # one chain serves dealer exposure and contract selection
+        chain, quote = data.option_snapshot(ticker, max_dte=max(cfg["max_dte"], GAMMA_MAX_DTE))
+    except Exception:
+        chain, quote = None, {}
+    spot = quote.get("price") or None  # the price the option quotes were taken against
     if bars is not None and len(bars):
-        # The latest 30-minute bar is as current as a quote (both are delayed) and saves a request.
         # Daily bars are cached, so bring today's bar up to date from the session so far.
-        spot = float(bars["Close"].iloc[-1])
+        spot = spot or float(bars["Close"].iloc[-1])
         session = bars[bars.index.date == bars.index[-1].date()]
         if daily.index[-1].date() == session.index[-1].date():
             daily = daily.astype({"Volume": float})
@@ -97,9 +97,8 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
             ]
     ind = ta.add_indicators(daily)
     snap = ta.snapshot(ind)
-    if bars is None or not len(bars):
-        spot = snap["close"]
-    reads = _read_structure(ticker, ind, bars, snap, spot, rate)
+    spot = spot or snap["close"]
+    reads = _read_structure(ind, bars, snap, spot, rate, chain, quote)
     score = structure.composite(reads)
     direction = ta.bias(score, cfg["min_trend_strength"])
     levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}
@@ -116,22 +115,13 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     }
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
     result["over_budget"] = False
-    if direction == "neutral":
+    result["chain_source"] = quote.get("source")
+    if direction == "neutral" or chain is None or chain.empty:
         return result
+    side = "call" if direction == "bullish" else "put"
+    df = chain[(chain["type"] == side) & chain["dte"].between(cfg["min_dte"], cfg["max_dte"])].copy()
 
-    # Rough price of the cheapest contract the filters would accept (about 0.30 delta, three weeks out).
-    # When even that is well over the per-trade limit, skip the chain requests entirely.
-    cheapest = 100 * CHEAPEST_FACTOR * spot * max(snap["hv20"], 0.15)
-    if cheapest > 1.5 * config.max_premium(cfg):
-        result["over_budget"] = True
-        return result
-
-    chain = data.option_chain(ticker, cfg["min_dte"], cfg["max_dte"], max_expiries=MAX_EXPIRIES)
-    if chain.empty:
-        return result
-    df = chain[chain["type"] == ("call" if direction == "bullish" else "put")].copy()
-
-    # Quotes are zeroed outside market hours; fall back to the last trade and flag it.
+    # A contract without a two-sided quote falls back to its last trade and is flagged.
     quoted = (df["bid"] > 0) & (df["ask"] > 0)
     df["stale"] = ~quoted
     df["mid"] = np.where(quoted, (df["bid"] + df["ask"]) / 2, df["lastPrice"])
@@ -140,12 +130,14 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
 
     df = df[
         (df["mid"] > 0.05)
-        & (df["cost"] <= config.max_premium(cfg))
         & (df["strike"].between(spot * 0.7, spot * 1.3))
         & (df["openInterest"] >= cfg["min_open_interest"])
         & (df["volume"] >= cfg["min_volume"])
         & (df["stale"] | (df["spread_pct"] <= cfg["max_spread_pct"]))
-    ].copy()
+    ]
+    affordable = df[df["cost"] <= config.max_premium(cfg)].copy()
+    result["over_budget"] = not df.empty and affordable.empty  # tradeable contracts exist, none fit
+    df = affordable
     if df.empty:
         return result
 
@@ -159,8 +151,8 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     solved = np.array(
         [greeks.implied_vol(p, spot, k, t, rate, q, c) for p, k, t, c in zip(mid, K, T, is_call)]
     )
-    yahoo_iv = df["impliedVolatility"].to_numpy(dtype=float)
-    iv = np.where(np.isnan(solved), yahoo_iv, solved)
+    listed_iv = df["impliedVolatility"].to_numpy(dtype=float)  # the data source's own IV
+    iv = np.where(np.isnan(solved), listed_iv, solved)
     keep = iv > 0.03
     df, is_call, T, K, mid, iv = df[keep].copy(), is_call[keep], T[keep], K[keep], mid[keep], iv[keep]
     if df.empty:

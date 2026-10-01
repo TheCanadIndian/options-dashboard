@@ -1,14 +1,22 @@
-"""Free market data from Yahoo Finance (delayed roughly 15 minutes)."""
+﻿"""Free market data, delayed roughly 15 minutes.
+
+Option chains come from Cboe's delayed quotes (one request per ticker, all expiries),
+falling back to Yahoo. Price bars, rates, dividends and earnings dates come from Yahoo.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, time as clock
+from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
 
@@ -74,42 +82,99 @@ def intraday(ticker: str) -> pd.DataFrame:
     return df.dropna(subset=["Close"])
 
 
-def open_interest(ticker: str, max_dte: int) -> pd.DataFrame:
-    """Open interest for every near-dated contract. It only changes overnight, so it is cached per day."""
-    path = STATE_DIR / "oi" / f"{ticker}.pkl"
-    today = date.today().isoformat()
-    if path.exists():
-        try:
-            cached = pd.read_pickle(path)
-            if cached["date"] == today:
-                return cached["chain"]
-        except Exception:
-            pass  # unreadable cache: refetch
-    chain = option_chain(ticker, 0, max_dte)
-    if not chain.empty:
-        chain = chain[["type", "strike", "expiration", "openInterest", "impliedVolatility"]]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        pd.to_pickle({"date": today, "chain": chain}, path)
-    return chain
+NEW_YORK = ZoneInfo("America/New_York")
 
 
-def iv_change(ticker: str, atm_iv: float) -> float | None:
-    """Record today's first at-the-money IV and return its change from the previous session.
+def market_open(now: datetime | None = None) -> bool:
+    """Regular US session, Monday to Friday. Exchange holidays are not checked."""
+    now = now or datetime.now(NEW_YORK)
+    return now.weekday() < 5 and clock(9, 30) <= now.time() <= clock(16, 0)
 
-    None until there is an earlier reading from the last week to compare against.
+
+# ---------------------------------------------------------------- option chains (Cboe)
+
+CBOE_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36"}
+CBOE_PER_SECOND = 2.0  # four a second in bursts drew 429s
+_OPTION = re.compile(r"^(?P<root>.+?)(?P<exp>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
+_cboe_lock = threading.Lock()
+_cboe_next = 0.0
+
+
+def _cboe_slot(backoff: float = 0.0) -> None:
+    global _cboe_next
+    with _cboe_lock:
+        now = time.monotonic()
+        if backoff:
+            _cboe_next = max(_cboe_next, now + backoff)
+        wait = max(0.0, _cboe_next - now)
+        _cboe_next = max(now, _cboe_next) + 1.0 / CBOE_PER_SECOND
+    time.sleep(wait)
+
+
+CHAIN_MEMO_SECONDS = 300  # a scan and the position updates after it share one fetch per ticker
+_chain_memo: dict[str, tuple[float, pd.DataFrame, dict[str, Any]]] = {}
+
+
+def cboe_chain(ticker: str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Every listed contract from Cboe's delayed quotes (one request), plus the underlying's quote."""
+    memo = _chain_memo.get(ticker)
+    if memo and time.monotonic() - memo[0] < CHAIN_MEMO_SECONDS:
+        return memo[1].copy(), dict(memo[2])
+    chain, quote = _fetch_cboe(ticker)
+    _chain_memo[ticker] = (time.monotonic(), chain, quote)
+    return chain.copy(), dict(quote)
+
+
+def _fetch_cboe(ticker: str) -> tuple[pd.DataFrame, dict[str, Any]]:
+    for attempt in range(4):
+        _cboe_slot()
+        r = requests.get(f"https://cdn.cboe.com/api/global/delayed_quotes/options/{ticker}.json",
+                         headers=CBOE_HEADERS, timeout=30)
+        if r.status_code != 429 or attempt == 3:
+            break
+        _cboe_slot(backoff=10.0 * 2**attempt)
+    r.raise_for_status()
+    body = r.json()["data"]
+    raw = pd.DataFrame(body["options"])
+    parts = raw["option"].str.extract(_OPTION)
+    df = pd.DataFrame({
+        "contractSymbol": raw["option"],
+        "type": parts["cp"].map({"C": "call", "P": "put"}),
+        "strike": parts["strike"].astype(float) / 1000,
+        "expiration": pd.to_datetime(parts["exp"], format="%y%m%d").dt.strftime("%Y-%m-%d"),
+        "bid": raw["bid"], "ask": raw["ask"], "lastPrice": raw["last_trade_price"],
+        "volume": raw["volume"], "openInterest": raw["open_interest"], "impliedVolatility": raw["iv"],
+    }).dropna(subset=["type"])
+    quote = {
+        "price": body.get("current_price") or body.get("close"),
+        "iv30": body.get("iv30"), "iv30_change": body.get("iv30_change"), "source": "Cboe",
+    }
+    return df, quote
+
+
+def option_snapshot(ticker: str, max_dte: int = 60) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """All contracts expiring within `max_dte` days, with a `dte` column, and the underlying quote.
+
+    Cboe first; if it cannot serve the ticker, Yahoo (one request per expiry, no IV change).
     """
-    path = STATE_DIR / "iv" / f"{ticker}.json"
     try:
-        history = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        history = {}
-    today = date.today().isoformat()
-    if today not in history:
-        history[today] = atm_iv
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(dict(sorted(history.items())[-30:])), encoding="utf-8")
-    earlier = [d for d in history if d < today and (date.today() - date.fromisoformat(d)).days <= 7]
-    return history[today] - history[max(earlier)] if earlier else None
+        chain, quote = cboe_chain(ticker)
+    except Exception:
+        chain = option_chain(ticker, 0, max_dte)
+        quote = {"price": None, "iv30": None, "iv30_change": None, "source": "Yahoo"}
+        if chain.empty:
+            return chain, quote
+    chain["dte"] = (pd.to_datetime(chain["expiration"]) - pd.Timestamp(date.today())).dt.days
+    chain = chain[chain["dte"].between(0, max_dte)].copy()
+    for col in ("bid", "ask", "lastPrice", "volume", "openInterest", "impliedVolatility"):
+        chain[col] = pd.to_numeric(chain[col], errors="coerce").fillna(0.0)
+    return chain.reset_index(drop=True), quote
+
+
+def option_quotes(ticker: str) -> tuple[pd.DataFrame, float | None]:
+    """Current bid/ask for every contract on a ticker, indexed by contract symbol, and the stock price."""
+    chain, quote = option_snapshot(ticker, max_dte=400)
+    return chain.set_index("contractSymbol"), quote["price"]
 
 
 def spot_price(ticker: str, fallback: float) -> float:
@@ -177,17 +242,6 @@ def _next_earnings(ticker: str) -> date | None:
         return min(upcoming) if upcoming else None
     except Exception:
         return None
-
-
-def quotes(ticker: str, expiration: str) -> pd.DataFrame:
-    """Current bid/ask for one expiry, indexed by contract symbol."""
-    tk = yf.Ticker(ticker)
-    call(lambda: tk.options)  # the expiry list is its own request
-    chain = call(tk.option_chain, expiration)
-    df = pd.concat([chain.calls, chain.puts], ignore_index=True)
-    for col in ("bid", "ask"):
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    return df.set_index("contractSymbol")
 
 
 def option_chain(ticker: str, min_dte: int, max_dte: int, max_expiries: int | None = None) -> pd.DataFrame:
