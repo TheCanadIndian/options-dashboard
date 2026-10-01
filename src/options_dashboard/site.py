@@ -465,7 +465,8 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
             + "".join(_cell(scores.get(k, ""), f"{scores[k]:+.0f}" if k in scores else "n/a") for k in keys)
             + _cell(lv.get("phase", ""), escape(lv.get("phase", "n/a")), False)
             + level("put_wall") + level("flip") + level("call_wall") + level("val") + level("poc") + level("vah")
-            + _cell(len(info["contracts"]), str(len(info["contracts"]))) + "</tr>"
+            + (_cell(-1, "Over budget", False) if info.get("over_budget")
+               else _cell(len(info["contracts"]), str(len(info["contracts"])))) + "</tr>"
         )
         cards.append(
             f'<article class="card" id="read-{escape(t)}"><header><h3>{escape(t)} · {_money(info["spot"])}</h3>'
@@ -495,10 +496,11 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 <div class="panel scroll"><table class="sortable"><thead><tr>{"".join(f"<th>{h}</th>" for h in read_heads)}</tr></thead>
 <tbody>{"".join(read_rows)}</tbody></table></div>
 <p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
-at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
+at least ±{cfg['min_trend_strength']} before any contract is flagged. "Over budget" means even its cheapest
+qualifying contract would cost well over the per-trade limit, so its options were not fetched.</p>
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
-    sub = (f"Every contract that passed the filters on the last scan, whether or not the portfolio bought it. "
-           f"Last scan {_when(result['scanned_at'].isoformat())} ET")
+    sub = (f"Every contract that passed the filters on the last scan, whether or not the portfolio bought it, "
+           f"across {len(tickers)} liquid stocks and ETFs. Last scan {_when(result['scanned_at'].isoformat())} ET")
     return _page("Scanner", sub, body, TABLE_JS)
 
 

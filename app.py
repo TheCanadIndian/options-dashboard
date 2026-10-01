@@ -17,7 +17,7 @@ INK, INK_MUTED = "#ffffff", "#898781"
 BLUE, ORANGE, AQUA, RED = "#3987e5", "#d95926", "#199e70", "#e66767"
 
 SCAN_KEYS = [
-    "watchlist", "account_size", "risk_per_trade_pct", "min_dte", "max_dte", "min_delta",
+    "use_universe", "watchlist", "account_size", "risk_per_trade_pct", "min_dte", "max_dte", "min_delta",
     "max_delta", "target_delta", "min_open_interest", "min_volume", "max_spread_pct",
     "min_trend_strength", "fallback_risk_free_rate",
 ]
@@ -37,9 +37,14 @@ def sidebar(cfg: dict) -> dict:
         cfg["risk_per_trade_pct"] = st.slider("Max premium per trade (% of account)", 1.0, 25.0, float(cfg["risk_per_trade_pct"]), 0.5)
         st.caption(f"Contracts costing more than ${config.max_premium(cfg):,.0f} are hidden.")
 
-        st.subheader("Watchlist")
+        st.subheader("What to scan")
+        cfg["use_universe"] = st.toggle(
+            "All liquid stocks and ETFs", bool(cfg["use_universe"]),
+            help="Rebuilt each trading day from Yahoo's screener: US stocks with heavy volume whose options "
+                 "have tight at-the-money spreads and real open interest, plus the main ETFs.",
+        )
         cfg["watchlist"] = config.clean_watchlist(
-            st.text_area("Tickers", " ".join(cfg["watchlist"]), height=100)
+            st.text_area("Always scan these tickers", " ".join(cfg["watchlist"]), height=100)
         )
 
         st.subheader("Contract filters")
@@ -248,7 +253,8 @@ def main() -> None:
     if top[0].button("Rescan now", type="primary", width="stretch"):
         run_scan.clear()
     scan_key = json.dumps({k: cfg[k] for k in SCAN_KEYS}, sort_keys=True)
-    with st.spinner(f"Scanning {len(cfg['watchlist'])} tickers..."):
+    scope = "the liquid universe" if cfg["use_universe"] else f"{len(cfg['watchlist'])} tickers"
+    with st.spinner(f"Scanning {scope}. A full universe scan takes a few minutes..."):
         result = run_scan(scan_key)
     contracts, tickers = result["contracts"], result["tickers"]
     best = scanner.best_per_ticker(contracts)

@@ -4,27 +4,73 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from datetime import date, datetime
 
 import pandas as pd
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
 from .config import STATE_DIR
 
 # ETFs have no earnings calendar and yfinance logs a 404 for each; callers handle the None.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
+# Yahoo throttles bursts, so every request goes through one shared pacer.
+REQUESTS_PER_SECOND = 3.0
+_pace_lock = threading.Lock()
+_next_slot = 0.0
+
+
+def _wait_for_slot(backoff: float = 0.0) -> None:
+    global _next_slot
+    with _pace_lock:
+        now = time.monotonic()
+        if backoff:  # rate limited: hold every thread back, not just this one
+            _next_slot = max(_next_slot, now + backoff)
+        wait = max(0.0, _next_slot - now)
+        _next_slot = max(now, _next_slot) + 1.0 / REQUESTS_PER_SECOND
+    if wait:
+        time.sleep(wait)
+
+
+def call(fn, *args, **kwargs):
+    """Make one Yahoo request, paced, retrying with backoff when rate limited."""
+    for attempt in range(4):
+        _wait_for_slot()
+        try:
+            return fn(*args, **kwargs)
+        except YFRateLimitError:
+            if attempt == 3:
+                raise
+            _wait_for_slot(backoff=15.0 * 2**attempt)
+
+
+HISTORY_MAX_AGE = 3600  # seconds; callers refresh today's bar from intraday data in between
+
 
 def history(ticker: str, period: str = "2y") -> pd.DataFrame:
-    df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
+    """Daily bars, cached for up to an hour so large scans stay within Yahoo's request limits."""
+    path = STATE_DIR / "history" / f"{ticker}.pkl"
+    try:
+        if time.time() - path.stat().st_mtime < HISTORY_MAX_AGE:
+            return pd.read_pickle(path)
+    except (OSError, ValueError, EOFError):
+        pass
+    df = call(yf.Ticker(ticker).history, period=period, interval="1d", auto_adjust=True, raise_errors=True)
     if df.empty or len(df) < 60:
         raise ValueError(f"{ticker}: not enough price history")
-    return df.dropna(subset=["Close"])
+    df = df.dropna(subset=["Close"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_pickle(path)
+    return df
 
 
 def intraday(ticker: str) -> pd.DataFrame:
     """A month of 30-minute regular-session bars, for the volume profile."""
-    df = yf.Ticker(ticker).history(period="1mo", interval="30m", auto_adjust=True, prepost=False)
+    df = call(yf.Ticker(ticker).history, period="1mo", interval="30m", auto_adjust=True, prepost=False,
+              raise_errors=True)
     return df.dropna(subset=["Close"])
 
 
@@ -68,7 +114,7 @@ def iv_change(ticker: str, atm_iv: float) -> float | None:
 
 def spot_price(ticker: str, fallback: float) -> float:
     try:
-        last = float(yf.Ticker(ticker).fast_info["lastPrice"])
+        last = float(call(lambda: yf.Ticker(ticker).fast_info["lastPrice"]))
         return last if last > 0 else fallback
     except Exception:
         return fallback
@@ -77,7 +123,7 @@ def spot_price(ticker: str, fallback: float) -> float:
 def risk_free_rate(fallback: float) -> float:
     """13-week T-bill yield as a decimal."""
     try:
-        irx = yf.Ticker("^IRX").history(period="5d")["Close"].dropna()
+        irx = call(yf.Ticker("^IRX").history, period="5d", raise_errors=True)["Close"].dropna()
         rate = float(irx.iloc[-1]) / 100.0
         return rate if 0 < rate < 0.2 else fallback
     except Exception:
@@ -86,11 +132,12 @@ def risk_free_rate(fallback: float) -> float:
 
 def dividend_yield(ticker: str) -> float:
     try:
-        divs = yf.Ticker(ticker).dividends
+        tk = yf.Ticker(ticker)
+        divs = call(lambda: tk.dividends)
         if divs.empty:
             return 0.0
         cutoff = divs.index.max() - pd.Timedelta(days=365)
-        price = float(yf.Ticker(ticker).fast_info["lastPrice"])
+        price = float(call(lambda: tk.fast_info["lastPrice"]))
         return float(divs[divs.index > cutoff].sum()) / price if price > 0 else 0.0
     except Exception:
         return 0.0
@@ -98,7 +145,7 @@ def dividend_yield(ticker: str) -> float:
 
 def next_earnings(ticker: str) -> date | None:
     try:
-        cal = yf.Ticker(ticker).calendar
+        cal = call(lambda: yf.Ticker(ticker).calendar)
         dates = cal.get("Earnings Date") if isinstance(cal, dict) else None
         upcoming = [d for d in dates or [] if d >= date.today()]
         return min(upcoming) if upcoming else None
@@ -108,23 +155,33 @@ def next_earnings(ticker: str) -> date | None:
 
 def quotes(ticker: str, expiration: str) -> pd.DataFrame:
     """Current bid/ask for one expiry, indexed by contract symbol."""
-    chain = yf.Ticker(ticker).option_chain(expiration)
+    tk = yf.Ticker(ticker)
+    call(lambda: tk.options)  # the expiry list is its own request
+    chain = call(tk.option_chain, expiration)
     df = pd.concat([chain.calls, chain.puts], ignore_index=True)
     for col in ("bid", "ask"):
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     return df.set_index("contractSymbol")
 
 
-def option_chain(ticker: str, min_dte: int, max_dte: int) -> pd.DataFrame:
-    """All calls and puts expiring inside the DTE window, one row per contract."""
+def option_chain(ticker: str, min_dte: int, max_dte: int, max_expiries: int | None = None) -> pd.DataFrame:
+    """Calls and puts expiring inside the DTE window, one row per contract.
+
+    With `max_expiries`, only that many expiries are fetched, spread evenly across the window.
+    """
     tk = yf.Ticker(ticker)
     today = date.today()
-    frames = []
-    for exp in tk.options:
+    eligible = []
+    for exp in call(lambda: tk.options):
         dte = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
-        if not min_dte <= dte <= max_dte:
-            continue
-        chain = tk.option_chain(exp)
+        if min_dte <= dte <= max_dte:
+            eligible.append((exp, dte))
+    if max_expiries and len(eligible) > max_expiries:
+        picks = sorted({round(i * (len(eligible) - 1) / (max_expiries - 1)) for i in range(max_expiries)})
+        eligible = [eligible[i] for i in picks]
+    frames = []
+    for exp, dte in eligible:
+        chain = call(tk.option_chain, exp)
         for kind, side in (("call", chain.calls), ("put", chain.puts)):
             if side.empty:
                 continue

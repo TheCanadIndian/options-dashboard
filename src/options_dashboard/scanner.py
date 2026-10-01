@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from . import config, data, greeks, structure, ta
+from . import config, data, greeks, structure, ta, universe
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -22,6 +22,11 @@ WEIGHTS = {
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
+MAX_EXPIRIES = 4  # expiries sampled across the DTE window, to keep requests per ticker down
+# A 0.30-delta option three weeks out costs about 0.044 x spot x volatility (Black-Scholes,
+# T = 21/365). Set a little lower so the skip errs toward fetching. Only used to skip
+# tickers that cannot fit the budget.
+CHEAPEST_FACTOR = 0.04
 FULL_CONVICTION = 70  # composite score that earns all of the direction points
 
 COLUMNS = [
@@ -38,7 +43,8 @@ def _scale(x, best, worst):
     return np.clip((np.asarray(x, dtype=float) - worst) / (best - worst), 0.0, 1.0)
 
 
-def _read_structure(ticker: str, ind: pd.DataFrame, snap: dict, spot: float, rate: float) -> dict:
+def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict,
+                    spot: float, rate: float) -> dict:
     """Run every method; one that lacks data or fails returns None and is left out."""
     def attempt(read):
         try:
@@ -63,7 +69,7 @@ def _read_structure(ticker: str, ind: pd.DataFrame, snap: dict, spot: float, rat
 
     atr = float(ind["atr"].iloc[-1])
     return {
-        "auction": attempt(lambda: structure.auction(data.intraday(ticker), atr)),
+        "auction": attempt(lambda: structure.auction(bars, atr)) if bars is not None else None,
         "gamma": attempt(dealer_exposure),
         "wyckoff": attempt(lambda: structure.wyckoff(ind)),
         "vpa": attempt(lambda: structure.vpa(ind)),
@@ -72,10 +78,28 @@ def _read_structure(ticker: str, ind: pd.DataFrame, snap: dict, spot: float, rat
 
 
 def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]:
-    ind = ta.add_indicators(data.history(ticker))
+    daily = data.history(ticker)
+    try:
+        bars = data.intraday(ticker)
+    except Exception:
+        bars = None
+    if bars is not None and len(bars):
+        # The latest 30-minute bar is as current as a quote (both are delayed) and saves a request.
+        # Daily bars are cached, so bring today's bar up to date from the session so far.
+        spot = float(bars["Close"].iloc[-1])
+        session = bars[bars.index.date == bars.index[-1].date()]
+        if daily.index[-1].date() == session.index[-1].date():
+            daily = daily.astype({"Volume": float})
+            last = daily.index[-1]
+            daily.loc[last, ["Open", "High", "Low", "Close", "Volume"]] = [
+                float(session["Open"].iloc[0]), float(session["High"].max()), float(session["Low"].min()),
+                spot, float(session["Volume"].sum()),
+            ]
+    ind = ta.add_indicators(daily)
     snap = ta.snapshot(ind)
-    spot = data.spot_price(ticker, snap["close"])
-    reads = _read_structure(ticker, ind, snap, spot, rate)
+    if bars is None or not len(bars):
+        spot = snap["close"]
+    reads = _read_structure(ticker, ind, bars, snap, spot, rate)
     score = structure.composite(reads)
     direction = ta.bias(score, cfg["min_trend_strength"])
     levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}
@@ -91,10 +115,18 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         ],
     }
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
+    result["over_budget"] = False
     if direction == "neutral":
         return result
 
-    chain = data.option_chain(ticker, cfg["min_dte"], cfg["max_dte"])
+    # Rough price of the cheapest contract the filters would accept (about 0.30 delta, three weeks out).
+    # When even that is well over the per-trade limit, skip the chain requests entirely.
+    cheapest = 100 * CHEAPEST_FACTOR * spot * max(snap["hv20"], 0.15)
+    if cheapest > 1.5 * config.max_premium(cfg):
+        result["over_budget"] = True
+        return result
+
+    chain = data.option_chain(ticker, cfg["min_dte"], cfg["max_dte"], max_expiries=MAX_EXPIRIES)
     if chain.empty:
         return result
     df = chain[chain["type"] == ("call" if direction == "bullish" else "put")].copy()
@@ -117,7 +149,8 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     if df.empty:
         return result
 
-    q = data.dividend_yield(ticker)
+    known = universe.meta(ticker)
+    q = known["dividend_yield"] if known.get("dividend_yield") is not None else data.dividend_yield(ticker)
     is_call = (df["type"] == "call").to_numpy()
     T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
     K = df["strike"].to_numpy(dtype=float)
@@ -166,7 +199,13 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         df[f"pts_{k}"] = np.round(WEIGHTS[k] * parts[k], 1)
     df["score"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)
 
-    earnings = data.next_earnings(ticker)
+    listed = known.get("earnings")
+    if listed and date.fromisoformat(listed) >= date.today():
+        earnings = date.fromisoformat(listed)
+    elif known and known.get("dividend_yield") is None:
+        earnings = None  # a listed ETF: no earnings
+    else:
+        earnings = data.next_earnings(ticker)
     df["earnings_before_expiry"] = (
         pd.to_datetime(df["expiration"]).dt.date >= earnings if earnings else False
     )
@@ -187,8 +226,8 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:  # one bad ticker must not sink the scan
             return ticker, None, f"{type(exc).__name__}: {exc}"
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for ticker, res, err in pool.map(work, cfg["watchlist"]):
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for ticker, res, err in pool.map(work, universe.tickers(cfg)):
             if err:
                 errors[ticker] = err
             else:
