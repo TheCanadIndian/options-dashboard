@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
-from . import portfolio
+from . import portfolio, universe
 from .config import HOME
 
 OUT = HOME / "docs" / "index.html"
@@ -499,8 +499,12 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 at least ±{cfg['min_trend_strength']} before any contract is flagged. "Over budget" means even its cheapest
 qualifying contract would cost well over the per-trade limit, so its options were not fetched.</p>
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
+    built = universe.load()
+    origin = (f" Universe from {escape(built['source'])}, built {_when(built['built'])} ET."
+              if built.get("source") else "")
     sub = (f"Every contract that passed the filters on the last scan, whether or not the portfolio bought it, "
-           f"across {len(tickers)} liquid stocks and ETFs. Last scan {_when(result['scanned_at'].isoformat())} ET")
+           f"across {len(tickers)} liquid stocks and ETFs. Last scan {_when(result['scanned_at'].isoformat())} ET."
+           f"{origin}")
     return _page("Scanner", sub, body, TABLE_JS)
 
 

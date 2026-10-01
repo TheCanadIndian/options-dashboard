@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -149,8 +149,8 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     if df.empty:
         return result
 
-    known = universe.meta(ticker)
-    q = known["dividend_yield"] if known.get("dividend_yield") is not None else data.dividend_yield(ticker)
+    is_etf = universe.meta(ticker).get("kind") == "etf"
+    q = data.dividend_yield(ticker)
     is_call = (df["type"] == "call").to_numpy()
     T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
     K = df["strike"].to_numpy(dtype=float)
@@ -199,13 +199,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         df[f"pts_{k}"] = np.round(WEIGHTS[k] * parts[k], 1)
     df["score"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)
 
-    listed = known.get("earnings")
-    if listed and date.fromisoformat(listed) >= date.today():
-        earnings = date.fromisoformat(listed)
-    elif known and known.get("dividend_yield") is None:
-        earnings = None  # a listed ETF: no earnings
-    else:
-        earnings = data.next_earnings(ticker)
+    earnings = None if is_etf else data.next_earnings(ticker)
     df["earnings_before_expiry"] = (
         pd.to_datetime(df["expiration"]).dt.date >= earnings if earnings else False
     )

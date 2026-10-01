@@ -130,7 +130,33 @@ def risk_free_rate(fallback: float) -> float:
         return fallback
 
 
+def _once_a_day(ticker: str, name: str, fetch):
+    """Return a per-ticker value fetched at most once per day. `fetch` must return JSON-safe data."""
+    path = STATE_DIR / "daily" / f"{ticker}.json"
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        stored = {}
+    today = date.today().isoformat()
+    if name in stored and stored[name][0] == today:
+        return stored[name][1]
+    value = fetch()
+    stored[name] = [today, value]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    return value
+
+
 def dividend_yield(ticker: str) -> float:
+    return _once_a_day(ticker, "dividend_yield", lambda: _dividend_yield(ticker))
+
+
+def next_earnings(ticker: str) -> date | None:
+    found = _once_a_day(ticker, "earnings", lambda: (lambda d: d.isoformat() if d else None)(_next_earnings(ticker)))
+    return date.fromisoformat(found) if found else None
+
+
+def _dividend_yield(ticker: str) -> float:
     try:
         tk = yf.Ticker(ticker)
         divs = call(lambda: tk.dividends)
@@ -143,9 +169,9 @@ def dividend_yield(ticker: str) -> float:
         return 0.0
 
 
-def next_earnings(ticker: str) -> date | None:
+def _next_earnings(ticker: str) -> date | None:
     try:
-        cal = call(lambda: yf.Ticker(ticker).calendar)
+        cal =call(lambda: yf.Ticker(ticker).calendar)
         dates = cal.get("Earnings Date") if isinstance(cal, dict) else None
         upcoming = [d for d in dates or [] if d >= date.today()]
         return min(upcoming) if upcoming else None

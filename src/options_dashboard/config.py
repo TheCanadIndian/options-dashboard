@@ -19,11 +19,12 @@ DEFAULTS: dict[str, Any] = {
     # Liquid universe, rebuilt each trading day (see universe.py); the watchlist is always scanned too
     "use_universe": True,
     "universe_size": 150,  # most liquid names kept, ranked by near-the-money open interest
-    "universe_candidates": 300,  # stocks taken from the screener, most traded first
-    "universe_min_avg_volume": 2_000_000,  # shares a day, 3-month average
+    "universe_candidates": 300,  # names checked for liquidity, most traded options first
+    "universe_min_option_volume": 10_000,  # option contracts traded in the last session (OCC)
+    "universe_min_avg_volume": 2_000_000,  # shares a day, 3-month average (Yahoo fallback only)
     "universe_min_price": 5.0,
     "universe_min_market_cap": 2_000_000_000,
-    "universe_min_option_oi": 3000,  # contracts within 10% of the money on the ~30-day expiry
+    "universe_min_option_oi": 10000,  # contracts within 10% of the money, all expiries 7-60 days out
     "universe_max_spread_pct": 10.0,  # median at-the-money bid/ask spread
     "account_size": 1000.0,
     "risk_per_trade_pct": 15.0,  # max premium per contract as % of account
