@@ -16,7 +16,7 @@ OUT = HOME / "docs" / "index.html"
 FACTOR_LABELS = {
     "trend": "Strength of the market read", "liquidity": "Liquidity", "breakeven": "Breakeven vs expected move",
     "iv_value": "Option price vs volatility", "gamma": "Gamma backdrop", "theta": "Low time decay",
-    "delta": "Delta near target",
+    "delta": "Delta near target", "target": "Breakeven inside structural target",
 }
 # Factor weights in force before the gamma factor existed; older positions do not store their own.
 LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15, "theta": 10, "delta": 10}
@@ -419,6 +419,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
             + _cell(r["ticker"], f'<a href="#read-{escape(r["ticker"])}">{escape(r["ticker"])}</a>', False)
             + _cell(r["type"], r["type"].capitalize(), False)
             + _cell(r["strike"], f"${r['strike']:g}")
+            + _cell(r["moneyness"], f"{r['moneyness']:+.1%}")
             + _cell(r["expiration"], _day(r["expiration"]) + warn)
             + _cell(r["cost"], _money(r["cost"], False))
             + _cell(status, escape(status), False)
@@ -432,7 +433,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
             + _cell(r["spread_pct"], spread)
             + _cell(r["openInterest"], f"{int(r['openInterest']):,}") + "</tr>"
         )
-    heads = ["Score", "Ticker", "Type", "Strike", "Expiry", "Cost", "Status", "Days", "Delta", "Theta/day", "IV",
+    heads = ["Score", "Ticker", "Type", "Strike", "OTM", "Expiry", "Cost", "Status", "Days", "Delta", "Theta/day", "IV",
              "IV/HV", "Breakeven move", "Chance of profit", "Spread", "Open interest"]
     options = "".join(f"<option>{escape(t)}</option>" for t in sorted(contracts["ticker"].unique()))
     table = (
@@ -442,7 +443,8 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
         '<div class="panel scroll"><table class="sortable" id="flagged"><thead><tr>'
         + "".join(f"<th>{h}</th>" for h in heads) + f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
         '<p class="muted small">Select a column heading to sort. ⚠ marks an expiry that falls after the next '
-        'earnings date. Cost is the ask price for one contract. Buy grade means the score is high enough to buy; '
+        'earnings date. OTM is how far the stock must move to reach the strike (negative means in the money). '
+        'Cost is the ask price for one contract. Buy grade means the score is high enough to buy; '
         'the note after it says why the portfolio has not.</p>'
         if rows else '<p class="muted">No contracts passed the filters on the last scan.</p>'
     )

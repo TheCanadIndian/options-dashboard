@@ -44,6 +44,19 @@ def equity(state: dict[str, Any]) -> float:
     return state["cash"] + sum(p["last_bid"] * 100 for p in state["positions"])
 
 
+def _target_note(row: pd.Series, ticker: str, call: bool) -> str:
+    """Where the strike sits, and whether the breakeven is inside the next structural level."""
+    away = row["moneyness"]
+    where = (f"{away:.1%} out of the money" if away > 0.005 else
+             f"{abs(away):.1%} in the money" if away < -0.005 else "at the money")
+    if pd.isna(row["target_price"]):
+        return f"The ${row['strike']:g} strike is {where}; no structural level is far enough away to aim at."
+    inside = row["breakeven_move"] <= row["target_move"]
+    return (f"The ${row['strike']:g} strike is {where}. The next target is the {row['target_label']} at "
+            f"${row['target_price']:.2f}, {row['target_move']:.1%} away, and breakeven "
+            f"{'sits inside it' if inside else 'needs a move beyond it'}.")
+
+
 def _contract_notes(row: pd.Series, cfg: dict[str, Any]) -> list[str]:
     """Plain-language reasons this particular contract was chosen."""
     ticker, call = row["ticker"], row["type"] == "call"
@@ -67,6 +80,7 @@ def _contract_notes(row: pd.Series, cfg: dict[str, Any]) -> list[str]:
         f"Time decay costs about ${abs(row['theta']) * 100:.2f} a day ({row['theta_pct']:.1%} of the premium).",
         f"Bid/ask spread is {row['spread_pct']:.1f}% with {int(row['openInterest']):,} contracts of open "
         f"interest, so it can be sold without giving much away.",
+        _target_note(row, ticker, call),
         f"Model chance of finishing past breakeven at expiry is {row['pop']:.0%}. The plan is to sell "
         f"earlier, at the target or the stop.",
     ]

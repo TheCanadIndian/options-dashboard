@@ -18,7 +18,7 @@ BLUE, ORANGE, AQUA, RED = "#3987e5", "#d95926", "#199e70", "#e66767"
 
 SCAN_KEYS = [
     "use_universe", "watchlist", "account_size", "risk_per_trade_pct", "min_dte", "max_dte", "min_delta",
-    "max_delta", "target_delta", "min_open_interest", "min_volume", "max_spread_pct",
+    "max_delta", "min_open_interest", "min_volume", "max_spread_pct",
     "min_trend_strength", "fallback_risk_free_rate",
 ]
 
@@ -77,6 +77,7 @@ def contracts_table(df: pd.DataFrame, key: str) -> pd.Series | None:
         "Ticker": df["ticker"],
         "Type": df["type"].str.capitalize(),
         "Strike": df["strike"],
+        "OTM": df["moneyness"] * 100,
         "Expiry": df["expiration"],
         "DTE": df["dte"],
         "Cost": df["cost"],
@@ -100,6 +101,7 @@ def contracts_table(df: pd.DataFrame, key: str) -> pd.Series | None:
         column_config={
             "Score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f"),
             "Strike": st.column_config.NumberColumn(format="$%g"),
+            "OTM": st.column_config.NumberColumn(format="%+.1f%%", help="How far the stock must move to reach the strike. Negative means in the money."),
             "Cost": st.column_config.NumberColumn(format="$%.0f", help="Ask price x 100: what one contract costs and the most you can lose."),
             "Delta": st.column_config.NumberColumn(format="%.2f"),
             "Theta/day": st.column_config.NumberColumn(format="$%.2f", help="Dollars one contract loses per day from time decay."),
@@ -329,7 +331,7 @@ def main() -> None:
             ("IV value", scanner.WEIGHTS["iv_value"], "Implied vol vs recent realised vol. Cheaper options score higher."),
             ("Gamma backdrop", scanner.WEIGHTS["gamma"], "Negative dealer gamma (moves extend) and room to reach breakeven before the wall."),
             ("Theta", scanner.WEIGHTS["theta"], "Share of the premium lost to time decay each day."),
-            ("Delta", scanner.WEIGHTS["delta"], f"Closeness to the target delta of {cfg['target_delta']:.2f}."),
+            ("Structural target", scanner.WEIGHTS["target"], "Breakeven inside the next level the stock is heading for (value area, point of control, gamma walls, flip, Wyckoff range), at least one ATR away. This is what lets an out-of-the-money strike score well."),
         ], columns=["Factor", "Points", "What it measures"]), hide_index=True, width="stretch")
         st.markdown(
             "Greeks are computed with Black-Scholes from the option's mid price, because Yahoo does "

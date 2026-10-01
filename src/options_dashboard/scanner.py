@@ -15,10 +15,17 @@ WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
     "liquidity": 15,  # tight spread and real open interest
     "breakeven": 15,  # move needed to break even vs the move the market expects
-    "iv_value": 15,  # implied vol relative to recent realised vol
+    "iv_value": 10,  # implied vol relative to recent realised vol
     "gamma": 10,  # negative dealer gamma and room before the wall
     "theta": 10,  # share of the premium lost per day
-    "delta": 5,  # closeness to the target delta
+    "target": 10,  # breakeven inside the next structural level in the trade's direction
+}
+
+# Levels a move can run to, by name. A target must be at least one ATR away to count.
+TARGET_LEVELS = {
+    "vah": "value area high", "val": "value area low", "poc": "point of control",
+    "call_wall": "call wall", "put_wall": "put wall", "flip": "gamma flip",
+    "range_high": "Wyckoff range high", "range_low": "Wyckoff range low",
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
@@ -29,7 +36,8 @@ COLUMNS = [
     "ticker", "type", "strike", "expiration", "dte", "score", "cost", "mid", "bid", "ask",
     "spread_pct", "delta", "gamma", "theta", "vega", "iv", "iv_hv", "pop", "breakeven",
     "breakeven_move", "expected_move", "theta_pct", "leverage", "openInterest", "volume",
-    "spot", "trend", "bias", "stale", "earnings_before_expiry", "contractSymbol",
+    "spot", "trend", "bias", "stale", "earnings_before_expiry", "contractSymbol", "moneyness",
+    "target_price", "target_label", "target_move",
     *(f"pts_{k}" for k in WEIGHTS),
 ]
 
@@ -37,6 +45,22 @@ COLUMNS = [
 def _scale(x, best, worst):
     """Map x linearly onto 1 (at `best`) .. 0 (at `worst`)."""
     return np.clip((np.asarray(x, dtype=float) - worst) / (best - worst), 0.0, 1.0)
+
+
+def structural_target(levels: dict[str, Any], spot: float, atr: float, bullish: bool) -> tuple[float, str] | None:
+    """The nearest level at least one ATR away in the trade's direction, with its name."""
+    found = []
+    for key, name in TARGET_LEVELS.items():
+        value = levels.get(key)
+        if value is None:
+            continue
+        gap = value - spot if bullish else spot - value
+        if gap >= atr:
+            found.append((gap, float(value), name))
+    if not found:
+        return None
+    _, value, name = min(found)
+    return value, name
 
 
 def _read_structure(ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float, rate: float,
@@ -183,6 +207,17 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     df["theta_pct"] = df["theta"].abs() / df["mid"]
     df["leverage"] = df["delta"].abs() * spot / df["mid"]
     df["iv_hv"] = iv / snap["hv20"] if snap["hv20"] > 0 else np.nan
+    # Positive moneyness is out of the money: how far the stock must move to reach the strike.
+    df["moneyness"] = np.where(is_call, df["strike"] / spot - 1, 1 - df["strike"] / spot)
+    target = structural_target(levels, spot, snap["atr_pct"] * spot, direction == "bullish")
+    if target:
+        df["target_price"], df["target_label"] = target
+        df["target_move"] = abs(target[0] / spot - 1)
+        # Full points when the breakeven sits inside the target, none when it needs twice the distance.
+        reach = _scale(df["breakeven_move"] / df["target_move"], 1.0, 2.0)
+    else:
+        df["target_price"], df["target_label"], df["target_move"] = np.nan, None, np.nan
+        reach = np.full(len(df), 0.5)  # no level to aim at: neither reward nor penalise
 
     spread = _scale(df["spread_pct"].fillna(cfg["max_spread_pct"] / 2), 0, cfg["max_spread_pct"])
     parts = {
@@ -192,7 +227,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         "breakeven": _scale(df["breakeven_move"] / df["expected_move"], 0.4, 1.5),
         "iv_value": _scale(df["iv_hv"].fillna(1.25), 0.9, 1.6),
         "theta": _scale(df["theta_pct"], 0.005, 0.04),
-        "delta": _scale((df["delta"].abs() - cfg["target_delta"]).abs(), 0.0, 0.25),
+        "target": reach,
     }
     for k in WEIGHTS:
         df[f"pts_{k}"] = np.round(WEIGHTS[k] * parts[k], 1)

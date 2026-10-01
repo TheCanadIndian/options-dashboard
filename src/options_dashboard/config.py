@@ -31,9 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "risk_per_trade_pct": 15.0,  # max premium per contract as % of account
     "min_dte": 21,
     "max_dte": 60,
-    "min_delta": 0.30,
+    "min_delta": 0.15,  # low enough to include out-of-the-money strikes
     "max_delta": 0.70,
-    "target_delta": 0.50,
     "min_open_interest": 100,
     "min_volume": 10,
     "max_spread_pct": 15.0,
