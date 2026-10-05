@@ -150,6 +150,54 @@ def price_chart(ind: pd.DataFrame, ticker: str) -> go.Figure:
     return fig
 
 
+SURFACE_COLS = [("p10", "10Δ put"), ("p25", "25Δ put"), ("atm", "ATM"), ("c25", "25Δ call"), ("c10", "10Δ call")]
+
+
+def _chart_layout(fig: go.Figure, title: str) -> go.Figure:
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=13, color="#c3c2b7"), x=0), height=300,
+        margin=dict(l=10, r=10, t=40, b=10), paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK, family="system-ui, 'Segoe UI', sans-serif"),
+        legend=dict(orientation="h", y=-0.2, x=0, font=dict(color="#c3c2b7")),
+    )
+    fig.update_xaxes(showgrid=False, linecolor=AXIS, tickfont=dict(color=INK_MUTED))
+    fig.update_yaxes(gridcolor=GRID, zeroline=False, tickfont=dict(color=INK_MUTED), tickformat=".0%")
+    return fig
+
+
+def smile_chart(surf: dict) -> go.Figure:
+    """Implied volatility across deltas for the expiries nearest 2 weeks, 30 days and 60 days."""
+    grid = pd.DataFrame(surf["grid"])
+    labels = [label for _, label in SURFACE_COLS]
+    fig = go.Figure()
+    picked: list[int] = []
+    for days, colour in ((14, BLUE), (30, ORANGE), (60, AQUA)):
+        i = int((grid["dte"] - days).abs().idxmin())
+        if i in picked:
+            continue
+        picked.append(i)
+        row = grid.loc[i]
+        fig.add_trace(go.Scatter(
+            x=labels, y=[row[k] for k, _ in SURFACE_COLS], name=f"{row['expiration']} ({row['dte']}d)",
+            mode="lines+markers", line=dict(color=colour, width=2), marker=dict(size=8),
+            hovertemplate="%{x}: %{y:.1%}<extra>%{fullData.name}</extra>"))
+    return _chart_layout(fig, "Volatility smile")
+
+
+def surface_chart(surf: dict) -> go.Figure:
+    """Implied volatility by expiry and delta; lighter is higher on the dark surface."""
+    grid = pd.DataFrame(surf["grid"])
+    z = grid[[k for k, _ in SURFACE_COLS]].to_numpy()
+    fig = go.Figure(go.Heatmap(
+        z=z, x=[label for _, label in SURFACE_COLS], y=[f"{e} ({d}d)" for e, d in zip(grid["expiration"], grid["dte"])],
+        colorscale=[[0, "#184f95"], [0.5, "#3987e5"], [1, "#cde2fb"]], xgap=2, ygap=2,
+        colorbar=dict(tickformat=".0%", tickfont=dict(color=INK_MUTED), thickness=10),
+        hovertemplate="%{y}, %{x}: %{z:.1%}<extra></extra>"))
+    fig = _chart_layout(fig, "Volatility surface")
+    fig.update_yaxes(tickformat=None, autorange="reversed", gridcolor=SURFACE)
+    return fig
+
+
 def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
     st.subheader(f"{ticker}  ·  ${info['spot']:,.2f}  ·  {info['bias']} ({info['trend']:+.0f})")
     if pick is not None:
@@ -167,6 +215,10 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
             st.info("No live bid/ask (market closed or no quote). Prices are from the last trade.", icon="ℹ️")
     left, right = st.columns([3, 2])
     left.plotly_chart(price_chart(info["indicators"], ticker), width="stretch")
+    if info.get("surface"):
+        smile_col, surface_col = left.columns(2)
+        smile_col.plotly_chart(smile_chart(info["surface"]), width="stretch")
+        surface_col.plotly_chart(surface_chart(info["surface"]), width="stretch")
     left.caption(f"RSI {info['rsi']:.0f} · 20-day realised vol {info['hv20']:.0%} · daily range (ATR) {info['atr_pct']:.1%}")
 
     levels = info["levels"]
@@ -305,7 +357,8 @@ def main() -> None:
             detail(pick["ticker"], tickers[pick["ticker"]], pick)
 
     with trends_tab:
-        short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "trend": "Trend"}
+        short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "vol": "Vol",
+                 "trend": "Trend"}
         trend_df = pd.DataFrame([
             {"Ticker": t, "Price": r["spot"], "Read": r["trend"], "Bias": r["bias"].capitalize(),
              **{short[m["key"]]: m["score"] for m in r["methods"]},

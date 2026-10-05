@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import config, data, earnings, flow, greeks, structure, ta, universe
+from . import config, data, earnings, flow, greeks, structure, ta, universe, vol
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -29,6 +29,7 @@ TARGET_LEVELS = {
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
+SURFACE_MAX_DTE = 120  # expiries used for the volatility surface
 IV_CHANGE_MIN = 0.5  # vol points: a smaller move in 30-day IV is noise for the vanna read
 FULL_CONVICTION = 70  # composite score that earns all of the direction points
 
@@ -63,8 +64,36 @@ def structural_target(levels: dict[str, Any], spot: float, atr: float, bullish: 
     return value, name
 
 
+def volatility_read(ticker: str, surf: dict, quote: dict[str, Any], report: date | None) -> dict:
+    """Skew and term-structure read, storing today's snapshot during market hours."""
+    if data.market_open():
+        stats = vol.record(ticker, surf, quote.get("iv30"))
+    else:  # after-hours quotes are too wide to store; read the stats without saving
+        stats = {"sessions": 0, "iv30": None, "rr_ratio": None, "iv_rank": None, "iv_percentile": None, "rr_z": None}
+    front = surf.get("front_expiry")
+    earnings_soon = bool(report and front and report <= date.fromisoformat(front))
+    return vol.read(surf, stats, earnings_soon)
+
+
+def _iv_value(df: pd.DataFrame, surf: dict | None, levels: dict[str, Any]) -> np.ndarray:
+    """0..1: cheap volatility scores higher.
+
+    Half implied against realised volatility, a quarter where the contract sits on its smile
+    (below the fitted curve is cheap), and a quarter IV rank once there is history for it.
+    """
+    vs_realised = _scale(df["iv_hv"].fillna(1.25), 0.9, 1.6)
+    residuals = (surf or {}).get("residuals", {})
+    off_smile = df["contractSymbol"].map(residuals).astype(float).fillna(0.0)
+    on_smile = _scale(off_smile, -0.02, 0.02)
+    rank = levels.get("iv_rank")
+    if rank is None:
+        return 0.67 * vs_realised + 0.33 * on_smile
+    return 0.5 * vs_realised + 0.25 * on_smile + 0.25 * (1 - rank)
+
+
 def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float,
-                    rate: float, chain: pd.DataFrame | None, quote: dict[str, Any]) -> dict:
+                    rate: float, chain: pd.DataFrame | None, quote: dict[str, Any], surf: dict | None,
+                    report: date | None) -> dict:
     """Run every method; one that lacks data or fails returns None and is left out."""
     def attempt(read):
         try:
@@ -95,6 +124,7 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
         "gamma": attempt(dealer_exposure),
         "wyckoff": attempt(lambda: structure.wyckoff(ind)),
         "vpa": attempt(lambda: structure.vpa(ind)),
+        "vol": attempt(lambda: volatility_read(ticker, surf, quote, report)) if surf else None,
         "trend": {"score": snap["trend"], "reasons": snap["reasons"]},
     }
 
@@ -106,7 +136,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     except Exception:
         bars = None
     try:  # one chain serves dealer exposure and contract selection
-        chain, quote = data.option_snapshot(ticker, max_dte=max(cfg["max_dte"], GAMMA_MAX_DTE))
+        chain, quote = data.option_snapshot(ticker, max_dte=max(cfg["max_dte"], GAMMA_MAX_DTE, SURFACE_MAX_DTE))
     except Exception:
         chain, quote = None, {}
     spot = quote.get("price") or None  # the price the option quotes were taken against
@@ -129,7 +159,13 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
             flow.record(ticker, chain)  # classify the volume traded since the last scan
         except Exception:
             pass
-    reads = _read_structure(ticker, ind, bars, snap, spot, rate, chain, quote)
+    is_etf = universe.meta(ticker).get("kind") == "etf"
+    report = None if is_etf else data.next_earnings(ticker)
+    try:
+        surf = vol.surface(chain, spot, rate, SURFACE_MAX_DTE) if chain is not None and not chain.empty else None
+    except Exception:
+        surf = None
+    reads = _read_structure(ticker, ind, bars, snap, spot, rate, chain, quote, surf, report)
     score = structure.composite(reads)
     direction = ta.bias(score, cfg["min_trend_strength"])
     levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}
@@ -147,8 +183,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
     result["over_budget"] = False
     result["chain_source"] = quote.get("source")
-    is_etf = universe.meta(ticker).get("kind") == "etf"
-    report = None if is_etf else data.next_earnings(ticker)
+    result["surface"] = {k: v for k, v in surf.items() if k != "residuals"} if surf else None
     result["earnings"], result["earnings_outlook"] = report, None
     if report and 0 <= (report - date.today()).days <= cfg["earnings_window_days"]:
         try:
@@ -232,7 +267,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         "gamma": structure.gamma_fit(reads["gamma"], is_call, df["breakeven"].to_numpy(), spot),
         "liquidity": 0.6 * spread + 0.4 * _scale(np.log10(df["openInterest"] + 1), 3.5, 1.5),
         "breakeven": _scale(df["breakeven_move"] / df["expected_move"], 0.4, 1.5),
-        "iv_value": _scale(df["iv_hv"].fillna(1.25), 0.9, 1.6),
+        "iv_value": _iv_value(df, surf, levels),
         "theta": _scale(df["theta_pct"], 0.005, 0.04),
         "target": reach,
     }

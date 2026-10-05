@@ -84,7 +84,8 @@ padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 
 footer{margin-top:40px;color:var(--muted);font-size:12px}
 """
 
-METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA", "trend": "Trend"}
+METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA",
+                "vol": "Vol surface", "trend": "Trend"}
 
 TABLE_JS = """
 document.querySelectorAll('table.sortable').forEach(function(table){
@@ -402,6 +403,38 @@ def _cell(value: Any, text: str, numeric: bool = True) -> str:
     return f'<td{" class=\"num\"" if numeric else ""} data-v="{escape(str(value))}">{text}</td>'
 
 
+def _surface_table(surf: dict[str, Any] | None) -> str:
+    """Implied volatility by expiry and delta, shaded light to dark as volatility rises."""
+    if not surf or not surf.get("grid"):
+        return ""
+    cols = [("p10", "10Δ put"), ("p25", "25Δ put"), ("atm", "ATM"), ("c25", "25Δ call"), ("c10", "10Δ call")]
+    values = [r[k] for r in surf["grid"] for k, _ in cols if r.get(k) == r.get(k) and r.get(k) is not None]
+    lo, hi = (min(values), max(values)) if values else (0, 1)
+
+    def cell(v: float | None) -> str:
+        if v is None or v != v:
+            return '<td class="num muted">n/a</td>'
+        shade = 0.08 + 0.5 * ((v - lo) / (hi - lo) if hi > lo else 0.5)
+        return (f'<td class="num" style="background:color-mix(in srgb,var(--series) {shade * 100:.0f}%,'
+                f'transparent)">{v:.0%}</td>')
+
+    rows = "".join(
+        f'<tr><td>{_day(r["expiration"])}</td><td class="num">{r["dte"]}</td>{"".join(cell(r.get(k)) for k, _ in cols)}</tr>'
+        for r in surf["grid"]
+    )
+    facts = []
+    if surf.get("rr25") == surf.get("rr25") and surf.get("rr25") is not None:
+        facts.append(f"30-day 25-delta risk reversal {surf['rr25'] * 100:+.1f} vol points")
+    if surf.get("term_slope") == surf.get("term_slope") and surf.get("term_slope") is not None:
+        facts.append(f"60-day against front-month IV {surf['term_slope']:+.0%}")
+    return (
+        '<h4>Volatility surface (implied volatility by delta)</h4><div class="scroll"><table><thead><tr>'
+        '<th>Expiry</th><th>Days</th>' + "".join(f"<th>{label}</th>" for _, label in cols)
+        + f'</tr></thead><tbody>{rows}</tbody></table></div>'
+        + (f'<p class="muted small">{escape("; ".join(facts))}. Darker cells are higher volatility.</p>' if facts else "")
+    )
+
+
 def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
     contracts, tickers = result["contracts"], result["tickers"]
     cutoff = (datetime.now() - timedelta(days=cfg["sim_reentry_days"])).isoformat()
@@ -474,7 +507,8 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
         cards.append(
             f'<article class="card" id="read-{escape(t)}"><header><h3>{escape(t)} · {_money(info["spot"])}</h3>'
             f'<div class="pl">{arrow} {info["trend"]:+.0f}</div></header>'
-            f'<details><summary>Reasoning</summary>{_methods_html(info["methods"])}</details></article>'
+            f'<details><summary>Reasoning</summary>{_methods_html(info["methods"])}'
+            f'{_surface_table(info.get("surface"))}</details></article>'
         )
     read_heads = ["Ticker", "Price", "Read", "Bias", *METHOD_SHORT.values(), "Wyckoff phase", "Put wall",
                   "Gamma flip", "Call wall", "Value low", "Point of control", "Value high", "Flagged"]
