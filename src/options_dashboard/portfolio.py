@@ -237,6 +237,8 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
             break
         ticker = row["ticker"]
         cost = float(row["ask"]) * 100 + cfg["sim_commission"]
+        if row["cost"] > config.max_premium(cfg):
+            continue  # the scanner shows every price; the account only buys within its per-trade limit
         if ticker in held or ticker in resting or cost > state["cash"]:
             continue
         entry = float(row["ask"])

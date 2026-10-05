@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from . import data
+from . import config, data
 from .config import HOME
 
 PAPER_DIR = HOME / "paper"
@@ -81,7 +81,8 @@ def _open_new(trades: list[dict[str, Any]], contracts: pd.DataFrame, cfg: dict[s
     if contracts.empty:
         return 0
     taken = {(t["ticker"], t["type"]) for t in trades}
-    picks = contracts[(contracts["score"] >= cfg["paper_min_score"]) & ~contracts["stale"]]
+    picks = contracts[(contracts["score"] >= cfg["paper_min_score"]) & ~contracts["stale"]
+                      & (contracts["cost"] <= config.max_premium(cfg))]
     opened = 0
     for _, row in picks.drop_duplicates("ticker").iterrows():
         if (row["ticker"], row["type"]) in taken:

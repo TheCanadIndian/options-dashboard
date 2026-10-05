@@ -104,7 +104,8 @@ def build(cfg: dict[str, Any], base_factors: dict[str, float], full_conviction: 
                 "OTM up to 5%" if m <= 0.05 else "OTM over 5%"].append(r["pnl"])
 
     exits = []
-    raw = [r for r in journal.outcomes() if r["source"] == "scanner"]
+    budget = cfg["account_size"] * cfg["risk_per_trade_pct"] / 100
+    raw = [r for r in journal.outcomes() if r["source"] == "scanner" and r["ask"] * 100 <= budget]
     for t in TARGETS:
         for s in STOPS:
             pnls = [p for p in (learning.profit(r, t, s, cfg["sim_commission"]) for r in raw) if p is not None]

@@ -18,7 +18,7 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
     top = scanner.best_per_ticker(result["contracts"]).head(15)
     print(f"\n{result['scanned_at']:%Y-%m-%d %H:%M}  scanned {len(result['tickers'])} tickers, "
           f"{len(result['contracts'])} contracts passed filters "
-          f"(max premium ${config.max_premium(cfg):.0f})")
+          f"(portfolio buys up to ${config.max_premium(cfg):.0f})")
     if top.empty:
         print("No contracts passed the filters.")
     for _, r in top.iterrows():

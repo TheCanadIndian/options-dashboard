@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 import requests
 
+from . import config
 from .config import STATE_DIR
 
 STATE_FILE = STATE_DIR / "alerts.json"
@@ -77,7 +78,8 @@ def notify(contracts: pd.DataFrame, cfg: dict[str, Any]) -> tuple[int, list[str]
         k: v for k, v in _load_state().items() if now - datetime.fromisoformat(v) < cooldown
     }
 
-    picks = contracts[(contracts["score"] >= cfg["alert_min_score"]) & ~contracts["stale"]]
+    picks = contracts[(contracts["score"] >= cfg["alert_min_score"]) & ~contracts["stale"]
+                      & (contracts["cost"] <= config.max_premium(cfg))]
     # One alert per ticker and direction per cooldown, for its best contract only.
     picks = picks.drop_duplicates("ticker")
     keys = picks["ticker"] + ":" + picks["type"]

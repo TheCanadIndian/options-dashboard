@@ -37,7 +37,8 @@ def sidebar(cfg: dict) -> dict:
         st.subheader("Account")
         cfg["account_size"] = st.number_input("Account size ($)", 100.0, 1e7, float(cfg["account_size"]), 100.0)
         cfg["risk_per_trade_pct"] = st.slider("Max premium per trade (% of account)", 1.0, 25.0, float(cfg["risk_per_trade_pct"]), 0.5)
-        st.caption(f"Contracts costing more than ${config.max_premium(cfg):,.0f} are hidden.")
+        st.caption(f"The scanner shows contracts at any price; the simulated portfolio and alerts only take "
+                   f"ones costing up to ${config.max_premium(cfg):,.0f}.")
 
         st.subheader("What to scan")
         cfg["use_universe"] = st.toggle(
@@ -345,7 +346,7 @@ def main() -> None:
 
     with picks_tab:
         if contracts.empty:
-            st.info("No contracts passed the filters. Try a larger premium budget, a wider delta or expiry range, or cheaper tickers.")
+            st.info("No contracts passed the filters. Try a wider delta or expiry range, or lower the liquidity limits.")
         else:
             show_all = st.toggle("Show every passing contract, not just the best per ticker")
             shown = contracts if show_all else best
@@ -387,7 +388,7 @@ def main() -> None:
             ("Volume price analysis", structure.METHOD_WEIGHTS["vpa"] * 100, "Effort against result on the last five daily bars: no demand, no supply, stopping volume, climaxes."),
             ("Trend and momentum", structure.METHOD_WEIGHTS["trend"] * 100, "Moving averages, MACD, RSI and 20-day return."),
         ], columns=["Method", "Weight %", "What it reads"]), hide_index=True, width="stretch")
-        st.markdown("Contracts that fit your budget and liquidity filters are then scored out of 100:")
+        st.markdown("Contracts that pass the liquidity filters are then scored out of 100:")
         st.dataframe(pd.DataFrame([
             ("Market read", scanner.WEIGHTS["trend"], "How strongly the combined read agrees with the contract's direction."),
             ("Liquidity", scanner.WEIGHTS["liquidity"], "Tight bid/ask spread and healthy open interest, so you can get in and out."),

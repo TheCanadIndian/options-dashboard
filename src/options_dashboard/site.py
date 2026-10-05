@@ -397,6 +397,8 @@ def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: s
         return "Buy grade · cooling off", True
     if len(state["positions"]) >= cfg["sim_max_positions"]:
         return "Buy grade · slots full", True
+    if row["cost"] > cfg["account_size"] * cfg["risk_per_trade_pct"] / 100:
+        return "Buy grade · over budget", True
     if row["ask"] * 100 + cfg["sim_commission"] > state["cash"]:
         return "Buy grade · no cash", True
     return "Buy grade", True
@@ -504,8 +506,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
             + "".join(_cell(scores.get(k, ""), f"{scores[k]:+.0f}" if k in scores else "n/a") for k in keys)
             + _cell(lv.get("phase", ""), escape(lv.get("phase", "n/a")), False)
             + level("put_wall") + level("flip") + level("call_wall") + level("val") + level("poc") + level("vah")
-            + (_cell(-1, "Over budget", False) if info.get("over_budget")
-               else _cell(len(info["contracts"]), str(len(info["contracts"])))) + "</tr>"
+            + _cell(len(info["contracts"]), str(len(info["contracts"]))) + "</tr>"
         )
         cards.append(
             f'<article class="card" id="read-{escape(t)}"><header><h3>{escape(t)} · {_money(info["spot"])}</h3>'
@@ -536,8 +537,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 <div class="panel scroll"><table class="sortable"><thead><tr>{"".join(f"<th>{h}</th>" for h in read_heads)}</tr></thead>
 <tbody>{"".join(read_rows)}</tbody></table></div>
 <p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
-at least ±{cfg['min_trend_strength']} before any contract is flagged. "Over budget" means even its cheapest
-qualifying contract would cost well over the per-trade limit, so its options were not fetched.</p>
+at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
     built = universe.load()
     origin = (f" Universe from {escape(built['source'])}, built {_when(built['built'])} ET."
@@ -582,7 +582,7 @@ def _plays_table(o: dict[str, Any]) -> str:
     if not o["plays"]:
         if o["implied_move"] is None:
             return '<p class="muted small">No option expiry falls close enough after the report to isolate it.</p>'
-        return '<p class="muted small">No out-of-the-money contract fits the budget and liquidity limits.</p>'
+        return '<p class="muted small">No out-of-the-money contract meets the liquidity limits.</p>'
     rows = "".join(
         f'<tr><td>{escape(_play_text(p))}</td><td class="num">{_money(p["cost"], False)}</td>'
         f'<td class="num">{" / ".join(f"{leg['delta']:+.2f}" for leg in p["legs"])}</td>'
@@ -679,7 +679,7 @@ def render_earnings(result: dict[str, Any], cfg: dict[str, Any]) -> str:
         "0.85x the typical move and rich above 1.2x. Rich options usually lose value after the report "
         "(volatility crush) even when the stock moves.",
         "Plays are out-of-the-money contracts on that expiry in the lean's direction (both sides when there is no "
-        "lean, plus a strangle when options are also cheap), within the per-trade budget. Each is tested against "
+        "lean, plus a strangle when options are also cheap), at any price. Each is tested against "
         "this stock's last 8 reactions, which is a small sample.",
         "Research notes are written by Claude from public sources on the date shown and are not refreshed "
         "automatically.",

@@ -101,8 +101,17 @@ def _earnings_exit(entry: dict[str, Any], days: dict[int, dict]) -> float | None
 
 
 def graded(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Profit for every journaled contract the portfolio could have bought.
+
+    The scanner flags contracts at any price, but dollar profit on a $2,000 contract would swamp
+    the $100 ones, and the account cannot buy them, so only contracts within the per-trade limit
+    are graded.
+    """
+    budget = cfg["account_size"] * cfg["risk_per_trade_pct"] / 100
     out = []
     for r in rows:
+        if r["ask"] * 100 > budget:
+            continue
         p = profit(r, cfg["sim_target_pct"] / 100, cfg["sim_stop_pct"] / 100, cfg["sim_commission"])
         if p is not None:
             out.append({**r, "pnl": p})

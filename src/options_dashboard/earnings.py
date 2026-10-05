@@ -335,7 +335,6 @@ def _options(out: dict[str, Any], chain: pd.DataFrame, spot: float, rate: float,
                      f"the report's share was separated using {method}"),
         }
 
-    budget = cfg["account_size"] * cfg["risk_per_trade_pct"] / 100
     usable = ex[(ex["openInterest"] >= cfg["earnings_min_open_interest"]) & (ex["spread"] <= cfg["earnings_max_spread"])]
     moves = [p["move"] for p in past]
     T = max((date.fromisoformat(expiry) - date.today()).days, 0.5) / 365
@@ -355,8 +354,7 @@ def _options(out: dict[str, Any], chain: pd.DataFrame, spot: float, rate: float,
         sign = 1 if side == "call" else -1
         pool = usable[(usable["type"] == side)
                       & (sign * (usable["strike"] - spot) >= 0.25 * reach * spot)
-                      & (sign * (usable["strike"] - spot) <= 1.25 * reach * spot)
-                      & (usable["ask"] * 100 <= budget)]
+                      & (sign * (usable["strike"] - spot) <= 1.25 * reach * spot)]
         for _, row in pool.iterrows():
             leg = describe(row)
             cost = row["ask"] * 100
@@ -373,8 +371,6 @@ def _options(out: dict[str, Any], chain: pd.DataFrame, spot: float, rate: float,
         puts = usable[(usable["type"] == "put") & (usable["strike"] < spot)].sort_values("strike", ascending=False)
         for (_, c), (_, p) in zip(calls.head(3).iterrows(), puts.head(3).iterrows()):
             cost = (c["ask"] + p["ask"]) * 100
-            if cost > budget:
-                continue
             legs = [describe(c), describe(p)]
             plays.append({
                 "kind": "Strangle", "legs": legs, "cost": float(cost),

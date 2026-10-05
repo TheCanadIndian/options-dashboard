@@ -181,7 +181,6 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         ],
     }
     result["contracts"] = pd.DataFrame(columns=COLUMNS)
-    result["over_budget"] = False
     result["chain_source"] = quote.get("source")
     result["surface"] = {k: v for k, v in surf.items() if k != "residuals"} if surf else None
     result["earnings"], result["earnings_outlook"] = report, None
@@ -208,10 +207,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         & (df["openInterest"] >= cfg["min_open_interest"])
         & (df["volume"] >= cfg["min_volume"])
         & (df["stale"] | (df["spread_pct"] <= cfg["max_spread_pct"]))
-    ]
-    affordable = df[df["cost"] <= config.max_premium(cfg)].copy()
-    result["over_budget"] = not df.empty and affordable.empty  # tradeable contracts exist, none fit
-    df = affordable
+    ].copy()
     if df.empty:
         return result
 
