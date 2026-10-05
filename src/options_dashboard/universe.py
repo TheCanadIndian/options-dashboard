@@ -37,6 +37,8 @@ FILE = STATE_DIR / "universe.json"
 NEW_YORK = ZoneInfo("America/New_York")
 HEADERS = data.CBOE_HEADERS  # Nasdaq and OCC refuse requests without a browser user agent
 
+YAHOO_MAX_CANDIDATES = 600  # the Yahoo fallback has no options-volume floor, so it needs a cap
+
 # Used only by the Yahoo fallback, which covers stocks alone.
 ETFS = [
     "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV", "XLI", "XLU", "XLP", "XLY", "XLB", "XBI",
@@ -90,7 +92,8 @@ def _candidates_occ(cfg: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], str
     etfs = {row["symbol"]: row for row in _nasdaq("etf")}
     found = {}
     for symbol, contracts in volume.sort_values(ascending=False).items():
-        if contracts < cfg["universe_min_option_volume"] or len(found) >= cfg["universe_candidates"]:
+        limit = cfg["universe_candidates"]
+        if contracts < cfg["universe_min_option_volume"] or (limit and len(found) >= limit):
             break
         kind = "stock" if symbol in stocks else "etf" if symbol in etfs else None
         if kind:  # anything else is an index or an unlisted product
@@ -108,14 +111,15 @@ def _candidates_yahoo(cfg: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], s
         EquityQuery("gt", ["intradaymarketcap", cfg["universe_min_market_cap"]]),
     ])
     found: dict[str, dict[str, Any]] = {}
-    while len(found) < cfg["universe_candidates"]:
+    limit = cfg["universe_candidates"] or YAHOO_MAX_CANDIDATES
+    while len(found) < limit:
         res = data.call(yf.screen, query, offset=len(found), size=250, sortField="avgdailyvol3m", sortAsc=False)
         quotes = res.get("quotes", [])
         for q in quotes:
             found[q["symbol"]] = {"name": q.get("shortName") or q["symbol"], "kind": "stock"}
         if not quotes or len(found) >= res.get("total", 0):
             break
-    found = dict(list(found.items())[: cfg["universe_candidates"]])
+    found = dict(list(found.items())[:limit])
     for etf in ETFS:
         found.setdefault(etf, {"name": etf, "kind": "etf"})
     return found, "Yahoo stock screener (share volume) plus a fixed ETF list"

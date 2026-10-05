@@ -75,11 +75,22 @@ def history(ticker: str, period: str = "2y") -> pd.DataFrame:
     return df
 
 
+INTRADAY_MAX_AGE = 20 * 60  # seconds: 30-minute bars, so every other 15-minute scan can reuse them
+
+
 def intraday(ticker: str) -> pd.DataFrame:
-    """A month of 30-minute regular-session bars, for the volume profile."""
+    """A month of 30-minute regular-session bars, for the volume profile (cached for 20 minutes)."""
+    path = STATE_DIR / "intraday" / f"{ticker}.pkl"
+    try:
+        if time.time() - path.stat().st_mtime < INTRADAY_MAX_AGE:
+            return pd.read_pickle(path)
+    except (OSError, ValueError, EOFError):
+        pass
     df = call(yf.Ticker(ticker).history, period="1mo", interval="30m", auto_adjust=True, prepost=False,
-              raise_errors=True)
-    return df.dropna(subset=["Close"])
+              raise_errors=True).dropna(subset=["Close"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_pickle(path)
+    return df
 
 
 NEW_YORK = ZoneInfo("America/New_York")
