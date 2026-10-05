@@ -25,7 +25,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 # Share of the composite direction score each method contributes.
 METHOD_WEIGHTS = {"auction": 0.25, "gamma": 0.20, "wyckoff": 0.15, "vpa": 0.15, "trend": 0.25}
 METHOD_NAMES = {
-    "auction": "Auction / market profile", "gamma": "Dealer gamma, vanna and charm", "wyckoff": "Wyckoff",
+    "auction": "Auction / market profile", "gamma": "Dealer gamma, vanna, charm and customer DEX", "wyckoff": "Wyckoff",
     "vpa": "Volume price analysis", "trend": "Trend and momentum",
 }
 
@@ -249,14 +249,22 @@ FLOW_MIN = 0.002  # vanna flow per vol point below this share of average daily d
 CHARM_MIN = 0.01
 
 
-def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
-          vol_trend: int, vol_note: str) -> dict[str, Any] | None:
-    """Dealer gamma, vanna and charm exposure from open interest.
+FULL_COVERAGE = 0.25  # classified flow covering this share of open interest earns full weight
+MIN_COVERAGE = 0.02  # below this the side of open interest is treated as unknown
 
-    Gamma gives the walls, the flip level and whether hedging dampens or extends moves.
-    Vanna and charm give the stock dealers must trade as implied volatility and time
-    change their delta. `vol_trend` is -1 when implied volatility is falling, +1 when
-    rising and 0 when unknown; `vol_note` says how that was judged.
+
+def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
+          vol_trend: int, vol_note: str, flow: dict[str, Any]) -> dict[str, Any] | None:
+    """Dealer gamma, vanna and charm exposure, and customer delta exposure (DEX).
+
+    `chain` carries a `customer` column: the estimated customer net position in each contract
+    (see flow.py), positive when customers are net long. Dealers hold the other side, so their
+    position is the negative of it. Open interest no classified flow explains counts as zero
+    rather than being assumed to be a customer buy. `flow` summarises how much of the open
+    interest the classified flow covers, and every signed reading is weighted by that coverage.
+
+    Gamma walls need no side: they are where gamma is most concentrated. `vol_trend` is -1
+    when implied volatility is falling, +1 when rising and 0 when unknown.
     """
     # Contracts expiring today are left out: their gamma swamps the walls and is gone by the close.
     df = chain[
@@ -274,43 +282,45 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
     K = df["strike"].to_numpy(dtype=float)
     oi = df["openInterest"].to_numpy(dtype=float)
     is_call = (df["type"] == "call").to_numpy()
-    sign = np.where(is_call, 1.0, -1.0)
+    customer = df["customer"].to_numpy(dtype=float)
+    dealer = -customer
 
-    def exposure(price: float) -> np.ndarray:
-        """Dollar gamma per 1% move, signed: calls positive, puts negative."""
+    def exposure(price: float, position: np.ndarray) -> np.ndarray:
+        """Dollar gamma per 1% move held through `position` (contracts, signed)."""
         g = greeks.greeks(price, K, T, rate, iv, 0.0, is_call)["gamma"]
-        return g * oi * 100 * price * price * 0.01 * sign
+        return g * position * 100 * price * price * 0.01
 
-    gex = pd.Series(exposure(spot), index=K)
-    net = float(gex.sum())
-    call_wall = float(gex[is_call].groupby(level=0).sum().idxmax())
-    put_wall = float(gex[~is_call].groupby(level=0).sum().idxmin())
+    # Walls: where gamma is concentrated, whoever holds it.
+    concentration = pd.Series(exposure(spot, oi), index=K)
+    call_wall = float(concentration[is_call].groupby(level=0).sum().idxmax())
+    put_wall = float(concentration[~is_call].groupby(level=0).sum().idxmax())
 
-    # Vanna and charm: how much stock dealers must trade as volatility and time change their delta.
-    # Positive numbers are dollars of stock bought.
-    second = greeks.greeks(spot, K, T, rate, iv, 0.0, is_call)
-    vanna_flow = float((second["vanna"] * oi * 100 * spot * sign).sum())  # per 1-point fall in IV
-    charm_flow = float(-(second["charm"] * oi * 100 * spot * sign).sum())  # per day of time decay
+    at_spot = greeks.greeks(spot, K, T, rate, iv, 0.0, is_call)
+    net = float(exposure(spot, dealer).sum())
+    vanna_flow = float((at_spot["vanna"] * dealer * 100 * spot).sum())  # stock dealers buy per 1-point fall in IV
+    charm_flow = float(-(at_spot["charm"] * dealer * 100 * spot).sum())  # stock dealers buy per day
+    customer_dex = float((at_spot["delta"] * customer * 100 * spot).sum())
+    gross_dex = float((np.abs(at_spot["delta"]) * oi * 100 * spot).sum())
 
-    grid = np.linspace(spot * 0.85, spot * 1.15, 61)
-    nets = np.array([exposure(p).sum() for p in grid])
-    crossings = np.nonzero(np.diff(np.sign(nets)))[0]
+    coverage = flow["coverage"]
+    confidence = float(np.clip((coverage - MIN_COVERAGE) / (FULL_COVERAGE - MIN_COVERAGE), 0.0, 1.0))
+    known = coverage >= MIN_COVERAGE
     flip = None
-    if len(crossings):
-        i = min(crossings, key=lambda j: abs(grid[j] - spot))
-        flip = float(grid[i] - nets[i] * (grid[i + 1] - grid[i]) / (nets[i + 1] - nets[i]))
+    if known:
+        grid = np.linspace(spot * 0.85, spot * 1.15, 61)
+        nets = np.array([exposure(p, dealer).sum() for p in grid])
+        crossings = np.nonzero(np.diff(np.sign(nets)))[0]
+        if len(crossings):
+            i = min(crossings, key=lambda j: abs(grid[j] - spot))
+            flip = float(grid[i] - nets[i] * (grid[i + 1] - grid[i]) / (nets[i + 1] - nets[i]))
 
     score = 0.0
-    reasons = [f"= Call wall ${call_wall:g}, put wall ${put_wall:g}, net gamma "
-               f"{'+' if net >= 0 else '-'}{_short(net)} per 1% move"]
-    if net >= 0:
-        score += 30 if flip and spot > flip else 15
-        level = f" (above the ${flip:.2f} gamma flip)" if flip and spot > flip else ""
-        reasons.append(f"+ Positive gamma{level}: dealer hedging supports dips, but it also dampens big moves")
-    else:
-        score -= 30 if flip and spot < flip else 15
-        level = f" (below the ${flip:.2f} gamma flip)" if flip and spot < flip else ""
-        reasons.append(f"- Negative gamma{level}: dealer hedging chases price, so moves tend to extend")
+    reasons = [
+        f"= Gamma is most concentrated at the ${call_wall:g} call strike and the ${put_wall:g} put strike",
+        f"= Side of open interest estimated from {flow['sessions']} session(s) of classified flow covering "
+        f"{coverage:.0%} of it ({flow['buys']:,.0f} contracts bought, {flow['sells']:,.0f} sold); "
+        f"the rest is treated as unknown, not as buys",
+    ]
     if 0 <= call_wall / spot - 1 <= 0.01:
         score -= 20
         reasons.append(f"! Pressing into the ${call_wall:g} call wall, which tends to act as resistance")
@@ -318,30 +328,55 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
         score += 20
         reasons.append(f"! Sitting on the ${put_wall:g} put wall, which tends to act as support")
 
+    if not known:
+        reasons.append("= Too little classified flow yet to sign dealer gamma, vanna, charm or customer delta")
+        return _out(score, reasons, call_wall=call_wall, put_wall=put_wall, flip=None, net_gex=None,
+                    vanna_flow=None, charm_flow=None, customer_dex=None, coverage=coverage, confidence=0.0)
+
+    weight = f" (weighted {confidence:.0%} for coverage)" if confidence < 1 else ""
+    if gross_dex and abs(customer_dex) >= 0.02 * gross_dex:
+        score += (15 if customer_dex > 0 else -15) * confidence
+        reasons.append(
+            f"{'+' if customer_dex > 0 else '-'} Customers are net {'long' if customer_dex > 0 else 'short'} "
+            f"{_short(customer_dex)} of delta through options "
+            f"({'buying calls or selling puts' if customer_dex > 0 else 'buying puts or selling calls'}){weight}")
+    else:
+        reasons.append(f"= Customer delta exposure is roughly balanced ({signed_short(customer_dex)})")
+
+    if net >= 0:
+        score += (30 if flip and spot > flip else 15) * confidence
+        level = f" above the ${flip:.2f} flip" if flip and spot > flip else ""
+        reasons.append(f"+ Dealers net long gamma{level} ({signed_short(net)} per 1% move): hedging supports dips "
+                       f"but dampens big moves{weight}")
+    else:
+        score -= (30 if flip and spot < flip else 15) * confidence
+        level = f" below the ${flip:.2f} flip" if flip and spot < flip else ""
+        reasons.append(f"- Dealers net short gamma{level} ({signed_short(net)} per 1% move): hedging chases price, "
+                       f"so moves tend to extend{weight}")
+
     # A flow only counts when it is a meaningful share of a normal day's trading.
     vanna_now = -vol_trend * vanna_flow  # falling IV (trend -1) realises the flow as written
     if vol_trend == 0 or abs(vanna_flow) < FLOW_MIN * adv_dollars:
         reasons.append(f"= Vanna: dealers would {'buy' if vanna_flow >= 0 else 'sell'} {_short(vanna_flow)} of stock "
                        f"per 1-point fall in implied volatility, too small or too unclear to lean on")
     else:
-        score += 20 if vanna_now > 0 else -20
+        score += (20 if vanna_now > 0 else -20) * confidence
         reasons.append(
             f"{'+' if vanna_now > 0 else '-'} Vanna {'tailwind' if vanna_now > 0 else 'headwind'}: implied volatility "
             f"is {'falling' if vol_trend < 0 else 'rising'} ({vol_note}), which makes dealers "
-            f"{'buy' if vanna_now > 0 else 'sell'} about {_short(vanna_flow)} of stock per point"
-        )
+            f"{'buy' if vanna_now > 0 else 'sell'} about {_short(vanna_flow)} of stock per point{weight}")
     if abs(charm_flow) < CHARM_MIN * adv_dollars:
         reasons.append(f"= Charm: time decay has dealers {'buying' if charm_flow >= 0 else 'selling'} "
                        f"{_short(charm_flow)} of stock a day, too small to matter")
     else:
-        score += 20 if charm_flow > 0 else -20
+        score += (20 if charm_flow > 0 else -20) * confidence
         reasons.append(
             f"{'+' if charm_flow > 0 else '-'} Charm {'tailwind' if charm_flow > 0 else 'headwind'}: as time passes, "
-            f"dealers must {'buy' if charm_flow > 0 else 'sell'} about {_short(charm_flow)} of stock a day to stay hedged"
-        )
+            f"dealers must {'buy' if charm_flow > 0 else 'sell'} about {_short(charm_flow)} of stock a day{weight}")
 
     return _out(score, reasons, call_wall=call_wall, put_wall=put_wall, flip=flip, net_gex=net,
-                vanna_flow=vanna_flow, charm_flow=charm_flow)
+                vanna_flow=vanna_flow, charm_flow=charm_flow, customer_dex=customer_dex,
+                coverage=coverage, confidence=confidence)
 
 
 # ---------------------------------------------------------------- composite
@@ -361,7 +396,11 @@ def gamma_fit(levels: dict[str, Any] | None, is_call: np.ndarray, breakeven: np.
     """
     if not levels:
         return np.full(len(breakeven), 0.5)
-    regime = 1.0 if levels["net_gex"] < 0 else 0.35
+    if levels.get("net_gex") is None:
+        regime = 0.5  # which side dealers are on is not known yet
+    else:
+        signed = 1.0 if levels["net_gex"] < 0 else 0.35
+        regime = 0.5 + (signed - 0.5) * levels.get("confidence", 1.0)
     wall = np.where(is_call, levels["call_wall"], levels["put_wall"])
     needed = np.abs(breakeven - spot)
     available = np.where(is_call, wall - spot, spot - wall)

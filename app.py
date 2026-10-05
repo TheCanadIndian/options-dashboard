@@ -182,15 +182,24 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
     right.dataframe(table.sort_values("Price", ascending=False), hide_index=True, width="stretch",
                     column_config={"Price": st.column_config.NumberColumn(format="$%.2f")})
 
-    if "net_gex" in levels:
-        gex, vanna, charm = right.columns(3)
-        gex.metric("Net gamma per 1%", structure.signed_short(levels["net_gex"]),
-                   "Moves dampened" if levels["net_gex"] >= 0 else "Moves extended", delta_color="off",
-                   help="Dollar gamma dealers carry per 1% move in the stock.")
-        vanna.metric("Vanna flow", structure.signed_short(levels["vanna_flow"]), "per 1-pt fall in IV", delta_color="off",
+    if "coverage" in levels:
+        def shown(key: str) -> str:
+            return "unknown" if levels.get(key) is None else structure.signed_short(levels[key])
+
+        dex, gex, vanna, charm = right.columns(4)
+        dex.metric("Customer DEX", shown("customer_dex"), delta_color="off",
+                   help="Net delta customers hold through options, estimated from classified buy and sell flow. "
+                        "Positive means net long (buying calls or selling puts).")
+        gex.metric("Dealer gamma per 1%", shown("net_gex"),
+                   None if levels.get("net_gex") is None else
+                   ("Moves dampened" if levels["net_gex"] >= 0 else "Moves extended"), delta_color="off",
+                   help="Dollar gamma dealers carry per 1% move, signed by the estimated customer positions.")
+        vanna.metric("Vanna flow", shown("vanna_flow"), "per 1-pt fall in IV", delta_color="off",
                      help="Stock dealers buy (+) or sell (-) when implied volatility falls one point. The sign reverses when it rises.")
-        charm.metric("Charm flow", structure.signed_short(levels["charm_flow"]), "per day", delta_color="off",
+        charm.metric("Charm flow", shown("charm_flow"), "per day", delta_color="off",
                      help="Stock dealers buy (+) or sell (-) each day as time decay changes their delta.")
+        right.caption(f"Classified flow explains {levels['coverage']:.0%} of open interest; the rest is treated "
+                      "as unknown rather than as customer buys.")
 
     right.markdown("**Why this direction**")
     marks = {"+": "▲", "-": "▼", "!": "⚠️", "=": "•"}
@@ -320,7 +329,7 @@ def main() -> None:
         )
         st.dataframe(pd.DataFrame([
             ("Auction / market profile", structure.METHOD_WEIGHTS["auction"] * 100, "Price against the 10-day and prior-day value areas from 30-minute bars, and whether value is migrating."),
-            ("Dealer gamma, vanna and charm", structure.METHOD_WEIGHTS["gamma"] * 100, "Gamma: net exposure, the flip level and the call and put walls. Vanna and charm: the stock dealers must buy or sell as implied volatility and time change their delta. All from open interest out to 45 days."),
+            ("Dealer gamma, vanna, charm and customer DEX", structure.METHOD_WEIGHTS["gamma"] * 100, "Which side holds each contract is estimated by classifying volume as bought at the ask or sold at the bid, every 15 minutes, over the last 10 sessions; unexplained open interest counts as unknown, not as buys. From that: customer delta exposure (net long or short delta), dealer gamma and its flip level, and the stock dealers must buy or sell as implied volatility (vanna) and time (charm) change their delta. Walls are where gamma is most concentrated. Readings are weighted by how much of the open interest the flow explains."),
             ("Wyckoff", structure.METHOD_WEIGHTS["wyckoff"] * 100, "Springs, upthrusts and breakouts of a 40-session range, or markup and markdown outside one."),
             ("Volume price analysis", structure.METHOD_WEIGHTS["vpa"] * 100, "Effort against result on the last five daily bars: no demand, no supply, stopping volume, climaxes."),
             ("Trend and momentum", structure.METHOD_WEIGHTS["trend"] * 100, "Moving averages, MACD, RSI and 20-day return."),

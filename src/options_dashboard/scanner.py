@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import config, data, earnings, greeks, structure, ta, universe
+from . import config, data, earnings, flow, greeks, structure, ta, universe
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -63,8 +63,8 @@ def structural_target(levels: dict[str, Any], spot: float, atr: float, bullish: 
     return value, name
 
 
-def _read_structure(ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float, rate: float,
-                    chain: pd.DataFrame | None, quote: dict[str, Any]) -> dict:
+def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float,
+                    rate: float, chain: pd.DataFrame | None, quote: dict[str, Any]) -> dict:
     """Run every method; one that lacks data or fails returns None and is left out."""
     def attempt(read):
         try:
@@ -85,7 +85,9 @@ def _read_structure(ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, sp
             week = spot / float(ind["Close"].iloc[-6]) - 1
             trend = 0 if abs(week) < 0.01 else (-1 if week > 0 else 1)
             note = f"inferred from the stock's {week:+.1%} move this week"
-        return structure.gamma(chain[chain["dte"] <= GAMMA_MAX_DTE], spot, rate, adv_dollars, trend, note)
+        near = chain[chain["dte"] <= GAMMA_MAX_DTE].copy()
+        near["customer"], summary = flow.customer_positions(ticker, near)
+        return structure.gamma(near, spot, rate, adv_dollars, trend, note, summary)
 
     atr = float(ind["atr"].iloc[-1])
     return {
@@ -122,7 +124,12 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     ind = ta.add_indicators(daily)
     snap = ta.snapshot(ind)
     spot = spot or snap["close"]
-    reads = _read_structure(ind, bars, snap, spot, rate, chain, quote)
+    if chain is not None and not chain.empty and data.market_open():
+        try:
+            flow.record(ticker, chain)  # classify the volume traded since the last scan
+        except Exception:
+            pass
+    reads = _read_structure(ticker, ind, bars, snap, spot, rate, chain, quote)
     score = structure.composite(reads)
     direction = ta.bias(score, cfg["min_trend_strength"])
     levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}

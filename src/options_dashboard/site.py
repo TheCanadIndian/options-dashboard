@@ -328,7 +328,8 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
     rules = [
         f"Starts with {_money(start, False)} in cash. Nothing here is real money.",
         "Direction comes from a combined read of auction and market profile (value area, point of control), "
-        "dealer gamma, vanna and charm (walls, flip level, hedging flows), Wyckoff structure, volume price analysis, and trend. Bullish reads "
+        "dealer positioning (gamma walls and flip, vanna, charm, and customer delta exposure estimated from "
+        "classified buy and sell flow), Wyckoff structure, volume price analysis, and trend. Bullish reads "
         "look for calls, bearish reads for puts, and mixed reads are skipped.",
         f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
         f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
