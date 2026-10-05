@@ -52,7 +52,9 @@ DEFAULTS: dict[str, Any] = {
     "sim_target_pct": 50.0,  # sell when the bid is this far above the entry price
     "sim_stop_pct": 40.0,  # sell when the bid is this far below the entry price
     "sim_exit_dte": 7,  # sell with this many days left, before time decay accelerates
-    "sim_review_time": "15:30",  # New York time: re-check every open position against the current read
+    # New York times to re-check every open position against the current read: after the open
+    # (spreads are widest in the first 15 minutes) and before the close
+    "sim_review_times": ["09:45", "15:30"],
     "sim_max_positions": 5,
     "sim_commission": 0.65,  # per contract, each way
     "sim_reentry_days": 2,  # wait this long before re-buying a ticker after selling it

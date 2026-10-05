@@ -1,5 +1,5 @@
 """Simulated portfolio: buys alert-grade picks and sells on target, stop, time limit
-or a failed end-of-day review.
+or a failed opening or end-of-day review.
 
 Buys fill at the ask and sells at the bid, with a commission each way, and exits
 are only checked when a scan runs. A price that gaps through a stop between scans
@@ -143,18 +143,37 @@ def _manage(state: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
                 _close(state, pos, "Time limit", now, cfg)
 
 
-def _review_due(state: dict[str, Any], cfg: dict[str, Any]) -> bool:
-    """True once per trading day, at the first scan on or after the review time."""
+REVIEW_MIN_AGE = timedelta(minutes=60)  # a position bought within the hour was just judged on this read
+
+
+def _review_label(slot: str) -> str:
+    return "Opening review" if slot < "12:00" else "End-of-day review"
+
+
+def _review_due(state: dict[str, Any], cfg: dict[str, Any]) -> str | None:
+    """The review slot due at this scan, if any.
+
+    Each slot runs once per trading day at the first scan on or after its time. If several are
+    outstanding (the PC was off at the earlier one), only the latest runs and the rest are skipped.
+    """
     now = datetime.now(NEW_YORK)
-    hour, minute = map(int, cfg["sim_review_time"].split(":"))
-    return (
-        now.weekday() < 5
-        and clock(hour, minute) <= now.time() <= clock(16, 0)
-        and state.get("last_review") != now.date().isoformat()
-    )
+    if now.weekday() >= 5 or now.time() > clock(16, 0):
+        return None
+    today = now.date().isoformat()
+    done = state.setdefault("reviews_done", {})
+    if "last_review" in state:  # state saved before there were several review times
+        done.setdefault("15:30", state.pop("last_review"))
+    due = [slot for slot in sorted(cfg["sim_review_times"])
+           if clock(*map(int, slot.split(":"))) <= now.time() and done.get(slot) != today]
+    if not due:
+        return None
+    for slot in due:
+        done[slot] = today
+    return due[-1]
 
 
-def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
+def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any],
+            label: str = "End-of-day review") -> None:
     """Check each open position against the current market read and sell the ones that no longer hold up.
 
     Hold while the read still points the trade's way. If the read has gone neutral, keep a
@@ -163,7 +182,9 @@ def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[s
     for pos in list(state["positions"]):
         info = result["tickers"].get(pos["ticker"])
         if info is None:
-            continue  # ticker failed to scan or left the watchlist; try again tomorrow
+            continue  # ticker failed to scan or left the watchlist; try again at the next review
+        if datetime.fromisoformat(now) - datetime.fromisoformat(pos["opened"]) < REVIEW_MIN_AGE:
+            continue
         want = "bullish" if pos["type"] == "call" else "bearish"
         read, bias = info["trend"], info["bias"]
         ret = pos["last_bid"] / pos["entry_price"] - 1
@@ -185,22 +206,21 @@ def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[s
             note = (f"The thesis has weakened: {summary}. The trade is up {ret:.0%}, so it stays open "
                     f"with the stop raised to the ${pos['entry_price']:.2f} entry price.")
         elif bias == "neutral":
-            verdict, sell = "Sell", "Review: thesis gone"
+            verdict, sell = "Sell", f"{label}: thesis gone"
             note = f"No longer viable: {summary} and the trade is down {abs(ret):.0%}."
         else:
-            verdict, sell = "Sell", "Review: read reversed"
+            verdict, sell = "Sell", f"{label}: read reversed"
             note = f"No longer viable: {summary}, against the {pos['type']}."
 
         pos.setdefault("reviews", []).append(
-            {"time": now, "verdict": verdict, "read": read, "note": note, "changed": changed}
+            {"time": now, "label": label, "verdict": verdict, "read": read, "note": note, "changed": changed}
         )
         state["log"].append({
             "time": now, "action": "REVIEW", "symbol": pos["symbol"], "label": pos["label"],
-            "price": pos["last_bid"], "note": f"{verdict}. {note}",
+            "price": pos["last_bid"], "note": f"{label}: {verdict}. {note}",
         })
         if sell:
             _close(state, pos, sell, now, cfg)
-    state["last_review"] = datetime.now(NEW_YORK).date().isoformat()
 
 
 def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
@@ -257,8 +277,9 @@ def update(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
         return state  # option quotes outside the session are too wide to trade or value against
     now = datetime.now().isoformat(timespec="seconds")
     _manage(state, now, cfg)
-    if _review_due(state, cfg):
-        _review(state, result, now, cfg)
+    slot = _review_due(state, cfg)
+    if slot:
+        _review(state, result, now, cfg, _review_label(slot))
     _buy(state, result, now, cfg)
     state["updated"] = now
     state["equity"].append([now, round(equity(state), 2)])

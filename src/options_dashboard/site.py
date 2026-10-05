@@ -237,12 +237,13 @@ def _reasoning(pos: dict[str, Any], opened: bool) -> str:
 
 
 def _review(pos: dict[str, Any]) -> str:
-    """The most recent end-of-day review, if the position has had one."""
+    """The most recent review (opening or end of day), if the position has had one."""
     if not pos.get("reviews"):
         return ""
     last = pos["reviews"][-1]
     changed = f' Changed since entry: {escape("; ".join(last["changed"]))}.' if last["changed"] else ""
-    return (f'<p class="review"><b>End-of-day review, {_when(last["time"])}: {escape(last["verdict"])}.</b> '
+    label = escape(last.get("label", "End-of-day review"))
+    return (f'<p class="review"><b>{label}, {_when(last["time"])}: {escape(last["verdict"])}.</b> '
             f'{escape(last["note"])}{changed}</p>')
 
 
@@ -337,7 +338,8 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
         f"{cfg['sim_max_positions']} positions, one per stock.",
         f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
         f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry.",
-        f"At {cfg['sim_review_time']} New York time each day, every open position is re-checked against the "
+        f"Twice a day ({' and '.join(cfg['sim_review_times'])} New York time, after the open and before the "
+        "close), every open position is re-checked against the "
         "current read. It is held if the read still points its way. If the read has gone neutral, a winner is "
         "kept with its stop raised to the entry price and a loser is sold. If the read has reversed, it is sold.",
         f"Buys fill at the ask and sells at the bid, with {_money(cfg['sim_commission'])} commission each way.",
