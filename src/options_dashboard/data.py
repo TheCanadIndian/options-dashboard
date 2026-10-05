@@ -125,6 +125,14 @@ def cboe_chain(ticker: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     return chain.copy(), dict(quote)
 
 
+def cached_quotes(ticker: str) -> pd.DataFrame | None:
+    """Bid and ask by contract symbol from a chain fetched in the last few minutes, without a request."""
+    memo = _chain_memo.get(ticker)
+    if not memo or time.monotonic() - memo[0] >= CHAIN_MEMO_SECONDS:
+        return None
+    return memo[1].set_index("contractSymbol")[["bid", "ask"]]
+
+
 def _fetch_cboe(ticker: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     for attempt in range(4):
         _cboe_slot()

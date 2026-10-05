@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import config, data
+from . import config, data, learning
 from .config import HOME
 from .scanner import WEIGHTS
 
@@ -255,7 +255,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
             "high_bid": float(row["bid"]), "low_bid": float(row["bid"]), "last_time": now,
             "marks": [[now, float(row["bid"])]],
             "score": float(row["score"]), "trend": float(row["trend"]), "bias": row["bias"],
-            "points": {k: float(row[f"pts_{k}"]) for k in WEIGHTS}, "weights": dict(WEIGHTS),
+            "points": {k: float(row[f"pts_{k}"]) for k in WEIGHTS}, "weights": learning.active("factors", WEIGHTS),
             "methods": info["methods"], "levels": info["levels"],
             "trend_reasons": info["reasons"], "contract_notes": _contract_notes(row, cfg),
             "delta": float(row["delta"]), "theta": float(row["theta"]), "iv": float(row["iv"]),

@@ -7,7 +7,7 @@ import sys
 import time
 from datetime import datetime
 
-from . import alerts, config, data, paper, portfolio, scanner, site
+from . import alerts, config, data, journal, paper, portfolio, scanner, scorecard, site
 
 market_open = data.market_open
 
@@ -35,6 +35,11 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
         state = portfolio.update(result, cfg)
         print(f"Portfolio: ${portfolio.equity(state):,.2f} "
               f"({len(state['positions'])} open, {len(state['closed'])} closed, cash ${state['cash']:,.2f})")
+        logged = journal.record_scan(result, cfg)
+        print(f"Journal: {logged['added']} added, {logged['updated']} followed, {logged['matured']} graded")
+        if scorecard.due():
+            card = scorecard.build(cfg, scanner.WEIGHTS, scanner.FULL_CONVICTION)
+            print(f"Scorecard rebuilt: {card['tuning']['message']}")
         site.build(state, cfg, result)
         if cfg["site_push"]:
             error = site.publish()

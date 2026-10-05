@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import config, data, earnings, flow, greeks, structure, ta, universe, vol
+from . import config, data, earnings, flow, greeks, learning, structure, ta, universe, vol
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -39,7 +39,7 @@ COLUMNS = [
     "breakeven_move", "expected_move", "theta_pct", "leverage", "openInterest", "volume",
     "spot", "trend", "bias", "stale", "earnings_before_expiry", "contractSymbol", "moneyness",
     "target_price", "target_label", "target_move",
-    *(f"pts_{k}" for k in WEIGHTS),
+    *(f"pts_{k}" for k in WEIGHTS), *(f"f_{k}" for k in WEIGHTS), "score_control",
 ]
 
 
@@ -271,9 +271,13 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         "theta": _scale(df["theta_pct"], 0.005, 0.04),
         "target": reach,
     }
+    # Raw 0-1 readings are kept so the journal can re-score contracts under other weights.
+    weights = learning.active("factors", WEIGHTS)
     for k in WEIGHTS:
-        df[f"pts_{k}"] = np.round(WEIGHTS[k] * parts[k], 1)
-    df["score"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)
+        df[f"f_{k}"] = np.asarray(parts[k], dtype=float)
+        df[f"pts_{k}"] = np.round(weights[k] * parts[k], 1)
+    df["score"] = sum(weights[k] * parts[k] for k in WEIGHTS).round(1)
+    df["score_control"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)  # original weights
 
     df["earnings_before_expiry"] = (
         pd.to_datetime(df["expiration"]).dt.date >= report if report else False

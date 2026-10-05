@@ -4,3 +4,5 @@ __pycache__/
 paper/
 # holds your alert topic and webhook
 config.json
+# local learning data (the site shows the scorecard)
+journal/

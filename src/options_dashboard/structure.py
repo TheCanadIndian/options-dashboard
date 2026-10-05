@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from . import greeks
+from . import greeks, learning
 
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -383,9 +383,10 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
 
 def composite(parts: dict[str, dict[str, Any] | None]) -> float:
     """Weighted direction score over the methods that produced a reading."""
+    weights = learning.active("methods", METHOD_WEIGHTS)
     used = {k: p for k, p in parts.items() if p is not None}
-    weight = sum(METHOD_WEIGHTS[k] for k in used)
-    return sum(METHOD_WEIGHTS[k] * p["score"] for k, p in used.items()) / weight if weight else 0.0
+    weight = sum(weights[k] for k in used)
+    return sum(weights[k] * p["score"] for k, p in used.items()) / weight if weight else 0.0
 
 
 def gamma_fit(levels: dict[str, Any] | None, is_call: np.ndarray, breakeven: np.ndarray, spot: float) -> np.ndarray:

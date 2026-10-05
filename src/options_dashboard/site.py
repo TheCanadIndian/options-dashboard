@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
-from . import earnings, portfolio, universe
+from . import earnings, portfolio, scorecard, structure, universe
 from .config import HOME
 
 OUT = HOME / "docs" / "index.html"
@@ -362,7 +362,8 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
-        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"), ("Earnings", "earnings.html"))
+        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"), ("Earnings", "earnings.html"),
+                           ("Learning", "learning.html"))
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -547,7 +548,8 @@ qualifying contract would cost well over the per-trade limit, so its options wer
     return _page("Scanner", sub, body, TABLE_JS)
 
 
-TITLES = {"Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner", "Earnings": "Earnings Outlook"}
+TITLES = {"Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner", "Earnings": "Earnings Outlook",
+          "Learning": "What's Working"}
 LEANS = {"bullish": "▲ Bullish", "bearish": "▼ Bearish", "neutral": "• Neutral"}
 
 
@@ -690,12 +692,114 @@ def render_earnings(result: dict[str, Any], cfg: dict[str, Any]) -> str:
     return _page("Earnings", sub, body, TABLE_JS)
 
 
+FACTOR_NAMES = {
+    "trend": "Strength of the market read", "liquidity": "Liquidity", "breakeven": "Breakeven vs expected move",
+    "iv_value": "Option price vs volatility", "gamma": "Gamma backdrop", "theta": "Low time decay",
+    "target": "Breakeven inside structural target",
+}
+
+
+def _dollars(x: float | None) -> str:
+    return "n/a" if x is None else _signed(x, False)
+
+
+def _edge_rows(table: dict[str, Any], names: dict[str, str], pct: bool) -> str:
+    def weight(w: float) -> str:
+        return f"{w:.0%}" if pct else f"{w:g}"
+
+    rows = []
+    for k, v in table.items():
+        changed = abs(v["active"] - v["base"]) > 1e-9
+        t = "n/a" if v.get("t") is None else f"{v['t']:+.1f}"
+        rows.append(
+            f'<tr><td>{escape(names.get(k, k))}</td><td class="num">{weight(v["base"])}</td>'
+            f'<td class="num">{weight(v["active"])}{" (learned)" if changed else ""}</td>'
+            f'<td class="num">{_dollars(v.get("edge"))}</td><td class="num">{t}</td>'
+            f'<td class="num">{v.get("days", 0)}</td></tr>')
+    return "".join(rows)
+
+
+def _summary_rows(items: list[tuple[str, dict[str, Any]]]) -> str:
+    return "".join(
+        f'<tr><td>{escape(label)}</td><td class="num">{s["trades"]}</td><td class="num">{_dollars(s["avg"])}</td>'
+        f'<td class="num">{_pct(s["win_rate"], 0)}</td><td class="num">{_dollars(s["total"])}</td></tr>'
+        for label, s in items)
+
+
+def render_learning(card: dict[str, Any], cfg: dict[str, Any]) -> str:
+    if not card:
+        body = ('<p class="muted">The journal starts filling at the next scan in market hours. The first contracts '
+                'are graded five trading days after they are flagged.</p>')
+        return _page("Learning", "What has made money, and how the scanner adjusts to it.", body, TABLE_JS)
+    c, tuning = card["collected"], card["tuning"]
+    tiles = [
+        ("Contracts graded", f"{c['scanner']:,}", f"over {c['sessions']} sessions"),
+        ("Being followed", f"{c['following']:,}", "graded after 5 trading days"),
+        ("Earnings plays graded", f"{c['earnings_plays']:,}", "held through the report"),
+        ("Learning", "On" if tuning["unlocked"] else "Locked", f"{tuning['days']} of 20 sessions needed"
+         if not tuning["unlocked"] else "weekly, profit-tested"),
+    ]
+    tile_html = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+                        for k, v, d in tiles)
+    heads = '<tr><th>Signal</th><th>Original weight</th><th>Weight in use</th><th>Profit edge per trade</th><th>t</th><th>Days</th></tr>'
+    summary_heads = '<tr><th>Group</th><th>Trades</th><th>Average profit</th><th>Win rate</th><th>Total</th></tr>'
+
+    picks = card["picks"]
+    active_total = sum(p["active"] for p in picks)
+    control_total = sum(p["control"] for p in picks)
+    picks_text = (f"Each day, the top five contracts (one per stock) under the weights in use made "
+                  f"{_dollars(active_total)} in total over {len(picks)} sessions, against {_dollars(control_total)} "
+                  f"for the original weights." if picks else "No graded sessions yet.")
+
+    exits = "".join(
+        f'<tr><td class="num">+{e["target"]:.0%}</td><td class="num">-{e["stop"]:.0%}</td><td class="num">{e["trades"]}</td>'
+        f'<td class="num">{_dollars(e["avg"])}</td><td class="num">{_pct(e["win_rate"], 0)}</td>'
+        f'<td>{"in use" if e["current"] else ""}</td></tr>' for e in card["exits"])
+    best = max((e for e in card["exits"] if e["avg"] is not None), key=lambda e: e["avg"], default=None)
+
+    earn = card["earnings"]
+    earn_rows = "".join(
+        f'<tr><td>{_day(r["date"])}</td><td>{escape(r["ticker"])}</td><td>{escape(r["lean"])} ({r["score"]:+.0f})</td>'
+        f'<td class="num">{_pct(r["beat_probability"], 0)}</td><td>{"beat" if r["beat"] else "missed"}</td>'
+        f'<td class="num">{_pct(r["move"], signed=True)}</td><td class="num">{_pct(r["implied"])}</td></tr>'
+        for r in earn["resolved"][:30])
+    log_rows = "".join(f'<tr><td>{_day(e["date"])}</td><td>{escape(e["change"])}</td><td>{escape(e["reason"])}</td></tr>'
+                       for e in reversed(card["log"]))
+
+    body = f"""<div class="tiles">{tile_html}</div>
+<p class="notice">{escape(tuning["message"] or "")}</p>
+<h2>Learned picks against the original weights</h2><div class="panel"><p>{escape(picks_text)}</p></div>
+<h2>Factors</h2><div class="panel scroll"><table><thead>{heads}</thead><tbody>{_edge_rows(card["factors"], FACTOR_NAMES, False)}</tbody></table></div>
+<p class="muted small">Profit edge: each day, the average profit of the contracts this factor rated in its top fifth minus its
+bottom fifth, averaged over days. t above 2 or below -2 is unlikely to be chance. Profit is for one contract bought at the ask
+and sold at the bid at the target, the stop or after five trading days, less commission.</p>
+<h2>Market read methods</h2><div class="panel scroll"><table><thead>{heads}</thead><tbody>{_edge_rows(card["methods"], structure.METHOD_NAMES, True)}</tbody></table></div>
+<h2>Profit by score</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows([(b["band"], b) for b in card["bands"]])}</tbody></table></div>
+<h2>Profit by moneyness</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows(sorted(card["moneyness"].items()))}</tbody></table></div>
+<h2>Exit rules</h2><div class="panel scroll"><table><thead><tr><th>Target</th><th>Stop</th><th>Trades</th><th>Average profit</th><th>Win rate</th><th></th></tr></thead><tbody>{exits}</tbody></table></div>
+<p class="muted small">{escape(f"Best so far: +{best['target']:.0%} target with a -{best['stop']:.0%} stop. " if best else "")}Exit rules are reported, not changed automatically.</p>
+<h2>Earnings</h2><div class="panel"><p>Plays held through the report: {card["earnings_plays"]["trades"]} graded, average {_dollars(card["earnings_plays"]["avg"])}, win rate {_pct(card["earnings_plays"]["win_rate"], 0)}.
+Leans called the reaction's direction {_pct(earn["lean_hit_rate"], 0)} of the time ({earn["leaning"]} reports).
+Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): {"n/a" if earn["brier"] is None else f"{earn['brier']:.3f}"}. {earn["pending"]} predictions waiting for their report.</p>
+{f'<div class="scroll"><table><thead><tr><th>Date</th><th>Ticker</th><th>Lean</th><th>Beat chance</th><th>Result</th><th>Reaction</th><th>Implied</th></tr></thead><tbody>{earn_rows}</tbody></table></div>' if earn_rows else ''}</div>
+<h2>Change log</h2><div class="panel scroll"><table><thead><tr><th>Date</th><th>Change</th><th>Why</th></tr></thead><tbody>{log_rows or '<tr><td colspan="3" class="muted">No weekly checks yet.</td></tr>'}</tbody></table></div>
+<h2>How learning works</h2><div class="panel"><ul>
+<li>Every flagged contract is journaled and followed for five trading days, then graded on dollars of profit as the portfolio would have traded it.</li>
+<li>Learning stays locked until 20 sessions and 1,000 graded contracts exist. Then, once a week, signals with a clear profit edge get up to 20% more weight and those that lose money up to 20% less.</li>
+<li>A change is adopted only if, on the latest five sessions (data it was not fitted to), its daily top-five picks made more money than the weights in use.</li>
+<li>The original weights run alongside as a control. If the learned weights make less for two weekly checks running, they revert.</li>
+<li>Overlapping contracts on the same stock and day are not independent, so sample sizes overstate certainty; the minimums and small steps guard against learning noise.</li></ul></div>"""
+    sub = f"What has made money, graded in dollars per contract, and how the scanner adjusts. Updated {escape(card['built'].replace('T', ' '))} ET."
+    return _page("Learning", sub, body, TABLE_JS)
+
+
 def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(render(state, cfg), encoding="utf-8")
     if result is not None:
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")
         OUT.with_name("earnings.html").write_text(render_earnings(result, cfg), encoding="utf-8")
+    OUT.with_name("learning.html").write_text(render_learning(scorecard.load(), cfg), encoding="utf-8")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
