@@ -330,7 +330,7 @@ def main() -> None:
     )
 
     tiles = st.columns(4)
-    tiles[0].metric("Max premium per trade", f"${config.max_premium(cfg):,.0f}")
+    tiles[0].metric("Portfolio max per trade", f"${config.max_premium(cfg):,.0f}")
     tiles[1].metric("Contracts passing filters", len(contracts))
     tiles[2].metric("Tickers with a setup", f"{len(best)} of {len(tickers)}")
     tiles[3].metric("Top score", f"{contracts['score'].max():.0f}" if len(contracts) else "None")

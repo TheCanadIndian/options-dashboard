@@ -30,6 +30,7 @@ TARGET_LEVELS = {
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
 SURFACE_MAX_DTE = 120  # expiries used for the volatility surface
+ATM_BAND = 0.005  # a strike within 0.5% of the price counts as at the money, not in it
 IV_CHANGE_MIN = 0.5  # vol points: a smaller move in 30-day IV is noise for the vanna read
 FULL_CONVICTION = 70  # composite score that earns all of the direction points
 
@@ -201,8 +202,12 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
     df["spread_pct"] = np.where(quoted, (df["ask"] - df["bid"]) / df["mid"] * 100, np.nan)
     df["cost"] = np.where(quoted, df["ask"], df["lastPrice"]) * 100
 
+    # Picks are at or out of the money only. In-the-money contracts still count everywhere the
+    # whole chain is read (dealer gamma, vanna, charm, customer DEX and the volatility surface).
+    at_or_out = np.where(df["type"] == "call", df["strike"] >= spot * (1 - ATM_BAND), df["strike"] <= spot * (1 + ATM_BAND))
     df = df[
-        (df["mid"] > 0.05)
+        at_or_out
+        & (df["mid"] > 0.05)
         & (df["strike"].between(spot * 0.7, spot * 1.3))
         & (df["openInterest"] >= cfg["min_open_interest"])
         & (df["volume"] >= cfg["min_volume"])
