@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="300">
+<title>Options Learning</title><style>
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
+--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
+--track:#e1e0d9}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
+--ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
+--series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;margin:0}h2{font-size:17px;margin:36px 0 12px}
+.sub{color:var(--ink2);margin:4px 0 0}.muted{color:var(--muted)}.small{font-size:13px}
+.notice{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:16px 0 0;color:var(--ink2);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:20px}
+.tile,.card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.tile{padding:12px 14px}.tile .k{color:var(--ink2);font-size:13px}.tile .v{font-size:24px;font-weight:600}
+.tile .d{font-size:13px;color:var(--ink2)}
+.up{color:var(--good)}.down{color:var(--bad)}
+.panel{padding:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:14px}
+.card{padding:14px}
+.card header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
+.card h3{margin:0;font-size:17px}.pl{font-size:17px;font-weight:600;white-space:nowrap}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0}
+.tag{border:1px solid var(--border);border-radius:999px;padding:1px 9px;font-size:12px;color:var(--ink2)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px 12px;margin:12px 0 0}
+.facts div span{display:block;color:var(--ink2);font-size:12px}.facts div b{font-weight:600}
+.range{margin:22px 0 4px}.bar{position:relative;height:6px;border-radius:3px;background:var(--track)}
+.bar i{position:absolute;top:-4px;width:2px;height:14px;background:var(--muted)}
+.bar u{position:absolute;top:-5px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--series);
+border:2px solid var(--surface)}
+.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink2);margin-top:8px}
+.review{margin:12px 0 0;padding:8px 10px;border-left:3px solid var(--series);background:var(--page);
+border-radius:4px;font-size:13px;color:var(--ink2)}.review b{color:var(--ink)}
+details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
+summary{cursor:pointer;font-weight:600}
+details h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
+details ul{margin:0;padding-left:18px}details li{margin:3px 0}
+ul.plain{list-style:none;padding:0}
+.pts{display:grid;grid-template-columns:minmax(120px,1.3fr) 1fr auto;gap:4px 10px;align-items:center;font-size:13px}
+.pts .b{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
+.pts .b span{display:block;height:100%;background:var(--series);border-radius:3px}
+.pts .n{font-variant-numeric:tabular-nums;color:var(--ink2)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav a{padding:5px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
+nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
+td a{color:inherit}
+.sortable th{cursor:pointer;white-space:nowrap;user-select:none}
+.sortable th[data-dir=asc]::after{content:" ▲"}.sortable th[data-dir=desc]::after{content:" ▼"}
+.sortable td{white-space:nowrap}
+.filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
+.filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
+.card:target{outline:2px solid var(--series)}
+#chart{position:relative}#chart svg{display:block;width:100%;height:auto}
+#tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+footer{margin-top:40px;color:var(--muted);font-size:12px}
+</style></head>
+<body><main>
+<nav><a href="index.html">Portfolio</a><a href="scanner.html">Scanner</a><a href="earnings.html">Earnings</a><a href="learning.html" aria-current="page">Learning</a></nav>
+<h1>What's Working</h1>
+<p class="sub">What has made money, and how the scanner adjusts to it.</p>
+<p class="muted">The journal starts filling at the next scan in market hours. The first contracts are graded five trading days after they are flagged.</p>
+<footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
+</main><script>
+document.querySelectorAll('table.sortable').forEach(function(table){
+table.querySelectorAll('th').forEach(function(th,i){th.tabIndex=0;function sort(){
+var body=table.tBodies[0],dir=th.dataset.dir==='desc'?'asc':'desc';
+table.querySelectorAll('th').forEach(function(o){delete o.dataset.dir});th.dataset.dir=dir;
+Array.from(body.rows).sort(function(a,b){var x=a.cells[i].dataset.v,y=b.cells[i].dataset.v,
+nx=parseFloat(x),ny=parseFloat(y),c=(isNaN(nx)||isNaN(ny))?x.localeCompare(y):nx-ny;
+return dir==='asc'?c:-c}).forEach(function(r){body.appendChild(r)})}
+th.addEventListener('click',sort);th.addEventListener('keydown',function(e){if(e.key==='Enter')sort()})})});
+(function(){var t=document.getElementById('f-ticker'),b=document.getElementById('f-buy'),
+n=document.getElementById('f-count');if(!t)return;var rows=document.querySelectorAll('#flagged tbody tr');
+function apply(){var shown=0;rows.forEach(function(r){var ok=(!t.value||r.dataset.t===t.value)&&
+(!b.checked||r.dataset.b==='1');r.style.display=ok?'':'none';shown+=ok});
+n.textContent='Showing '+shown+' of '+rows.length}
+t.addEventListener('change',apply);b.addEventListener('change',apply);apply()})();
+</script></body></html>
