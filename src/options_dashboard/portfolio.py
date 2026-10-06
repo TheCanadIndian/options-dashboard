@@ -244,6 +244,18 @@ def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str
     return None
 
 
+def exposure_limits(result: dict[str, Any], cfg: dict[str, Any]) -> tuple[int, int, str | None]:
+    """Most positions in total and in one direction, and why they are reduced (None if they are not)."""
+    model = result.get("regime_model") or {}
+    odds = (model.get("odds") or {}).get("drop_odds")
+    inverted = any("VIX is above VIX3M" in w for w in model.get("warnings", []))
+    if inverted or (odds is not None and odds >= cfg["sim_risk_drop_odds"]):
+        reason = ("VIX is above VIX3M" if inverted else
+                  f"{model['state']} has seen a 5%+ drop within a month {odds:.0%} of the time")
+        return cfg["sim_max_positions_risky"], cfg["sim_max_same_direction_risky"], reason
+    return cfg["sim_max_positions"], cfg["sim_max_same_direction"], None
+
+
 def buys_today(state: dict[str, Any], today: str) -> int:
     return sum(1 for e in state["log"] if e["action"] == "BUY" and e["time"][:10] == today)
 
@@ -261,6 +273,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
         return
     regime = market_regime(result, cfg)
     state["regime"] = {**regime, "time": now}
+    max_positions, max_same_way, _ = exposure_limits(result, cfg)
     held = {p["ticker"] for p in state["positions"]}
     cutoff = (datetime.fromisoformat(now) - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
@@ -268,14 +281,14 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
     bought = 0
 
     for _, row in picks.iterrows():  # already sorted best first
-        if len(state["positions"]) >= cfg["sim_max_positions"] or bought >= allowed:
+        if len(state["positions"]) >= max_positions or bought >= allowed:
             break
         ticker = row["ticker"]
         cost = float(row["ask"]) * 100 + cfg["sim_commission"]
         if entry_block(row, result["tickers"][ticker], regime, cfg):
             continue
         same_way = sum(1 for p in state["positions"] if p["type"] == row["type"])
-        if same_way >= cfg["sim_max_same_direction"]:
+        if same_way >= max_same_way:
             continue
         if ticker in held or ticker in resting or cost > state["cash"]:
             continue

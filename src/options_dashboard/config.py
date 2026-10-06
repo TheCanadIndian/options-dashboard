@@ -62,6 +62,11 @@ DEFAULTS: dict[str, Any] = {
     "sim_regime_threshold": 15,
     "sim_counter_trend_min": 50,
     "sim_max_same_direction": 3,  # most positions betting the same way
+    # When the market regime's historical odds of a 5% drop within a month reach this level, or VIX
+    # is above VIX3M, the account holds fewer positions.
+    "sim_risk_drop_odds": 0.20,
+    "sim_max_positions_risky": 3,
+    "sim_max_same_direction_risky": 2,
     "sim_review_min_days": 3,  # trading days before a review can close a new position (stops still apply)
     "sim_max_entry_spread": 8.0,  # % bid/ask spread allowed when buying
     "sim_first_buy_time": "10:30",  # New York time: no buys while opening spreads are wide

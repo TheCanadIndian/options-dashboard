@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import avwap, config, data, earnings, flow, greeks, learning, seasonal, sectors, structure, ta, universe, vol
+from . import avwap, config, data, earnings, flow, greeks, learning, regime, seasonal, sectors, structure, ta, universe, vol
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -130,7 +130,8 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
         "vol": attempt(lambda: volatility_read(ticker, surf, quote, report)) if surf else None,
         "avwap": attempt(lambda: avwap.read(ind, spot)),
         "sector": attempt(lambda: sectors.read(ticker, (context or {}).get("sectors", {}).get(ticker),
-                                               (context or {}).get("rotation", {}), ind)),
+                                               (context or {}).get("rotation", {}), ind,
+                                               (context or {}).get("regime"))),
         "seasonal": attempt(lambda: seasonal.read(seasonal.stats(ticker))),
         "trend": {"score": snap["trend"], "reasons": snap["reasons"]},
     }
@@ -300,7 +301,11 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
     """Scan the whole watchlist. Returns ranked contracts, per-ticker detail and errors."""
     rate = data.risk_free_rate(cfg["fallback_risk_free_rate"])
     tickers, errors = {}, {}
-    context = {"rotation": sectors.rotation(), "sectors": sectors.sector_of()}
+    context = {"rotation": sectors.rotation(), "sectors": sectors.sector_of(), "regime": None}
+    try:  # breadth comes from the previous scan; this scan's is stored for the next one
+        context["regime"] = regime.read(*regime.last_breadth())
+    except Exception:
+        pass
 
     def work(ticker: str):
         try:
@@ -315,6 +320,10 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
             else:
                 tickers[ticker] = res
 
+    try:
+        regime.breadth_now(tickers)
+    except Exception:
+        pass
     frames = [r["contracts"] for r in tickers.values() if not r["contracts"].empty]
     contracts = (
         pd.concat(frames, ignore_index=True).sort_values("score", ascending=False)
@@ -327,6 +336,7 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
         "errors": errors,
         "rate": rate,
         "rotation": context["rotation"],
+        "regime_model": context["regime"],
         "scanned_at": datetime.now(),
     }
 

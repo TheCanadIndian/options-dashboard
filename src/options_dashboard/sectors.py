@@ -109,8 +109,13 @@ def rotation() -> dict[str, dict[str, Any]]:
     return out
 
 
-def read(ticker: str, sector: str | None, rot: dict[str, dict[str, Any]], daily: pd.DataFrame) -> dict[str, Any] | None:
-    """Sector quadrant plus the stock's one-month strength against its sector ETF."""
+REGIME_TILT = 10  # points for a sector the current market regime favours (or against one it does not)
+
+
+def read(ticker: str, sector: str | None, rot: dict[str, dict[str, Any]], daily: pd.DataFrame,
+         regime: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Sector quadrant, the stock's one-month strength against its sector ETF, and a tilt toward
+    sectors that have done best in the current market regime and are rotating the right way."""
     etf_sector = next((s for s, e in SECTOR_ETFS.items() if e == ticker), None)
     sector = sector or etf_sector
     if not sector or sector not in rot:
@@ -134,5 +139,16 @@ def read(ticker: str, sector: str | None, rot: dict[str, dict[str, Any]], daily:
                 reasons.append(f"= Moving with its sector over the past month ({rel:+.1%} relative)")
         except Exception:
             pass
+    if regime:
+        favoured = {f["sector"]: f for f in regime.get("favoured", [])}
+        avoided = {f["sector"]: f for f in regime.get("avoid", [])}
+        if sector in favoured:
+            score += REGIME_TILT
+            reasons.append(f"+ Favoured in the current regime ({regime['state']}): {sector} has beaten SPY by "
+                           f"{favoured[sector]['edge']:+.1%} a month on average in this state since 2008")
+        elif sector in avoided:
+            score -= REGIME_TILT
+            reasons.append(f"- Out of favour in the current regime ({regime['state']}): {sector} has trailed SPY by "
+                           f"{abs(avoided[sector]['edge']):.1%} a month on average in this state since 2008")
     return {"score": float(np.clip(score, -100, 100)), "reasons": reasons, "sector": sector,
             "sector_quadrant": row["quadrant"]}

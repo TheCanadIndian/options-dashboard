@@ -10,7 +10,7 @@ from html import escape
 import numpy as np
 from typing import Any
 
-from . import config, earnings, portfolio, scorecard, structure, universe
+from . import config, earnings, portfolio, regime, scorecard, structure, universe
 from .config import HOME
 
 OUT = HOME / "docs" / "index.html"
@@ -82,10 +82,12 @@ td a{color:inherit}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
 .filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
 .card:target{outline:2px solid var(--series)}
+.dbar{position:relative;height:8px;background:var(--track);border-radius:4px}
+.dbar span{position:absolute;top:0;height:8px;border-radius:4px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:14px;background:var(--axis)}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
-#chart{position:relative}#chart svg{display:block;width:100%;height:auto}
-#tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+.linechart{position:relative}.linechart svg{display:block;width:100%;height:auto}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 footer{margin-top:40px;color:var(--muted);font-size:12px}
 """
@@ -112,8 +114,8 @@ t.addEventListener('change',apply);b.addEventListener('change',apply);apply()})(
 """
 
 CHART_JS = """
-(function(){var el=document.getElementById('chart');if(!el)return;var d=JSON.parse(el.dataset.points),
-svg=el.querySelector('svg'),line=svg.querySelector('#xh'),dot=svg.querySelector('#xd'),tip=document.getElementById('tip');
+document.querySelectorAll('.linechart').forEach(function(el){var d=JSON.parse(el.dataset.points),
+svg=el.querySelector('svg'),line=svg.querySelector('.xh'),dot=svg.querySelector('.xd'),tip=el.querySelector('.tip');
 function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,
 vx=cx/r.width*800,best=0,gap=1e9;for(var i=0;i<d.length;i++){var g=Math.abs(d[i][0]-vx);if(g<gap){gap=g;best=i}}
 var p=d[best];line.setAttribute('x1',p[0]);line.setAttribute('x2',p[0]);dot.setAttribute('cx',p[0]);
@@ -123,7 +125,7 @@ tip.style.left=Math.min(Math.max(x-tip.offsetWidth/2,0),r.width-tip.offsetWidth)
 tip.style.top=Math.max(p[1]/260*r.height-tip.offsetHeight-12,0)+'px'}
 function out(){line.style.display=dot.style.display='none';tip.style.display='none'}
 svg.addEventListener('mousemove',move);svg.addEventListener('touchstart',move,{passive:true});
-svg.addEventListener('touchmove',move,{passive:true});svg.addEventListener('mouseleave',out)})();
+svg.addEventListener('touchmove',move,{passive:true});svg.addEventListener('mouseleave',out)});
 """
 
 
@@ -154,54 +156,57 @@ def _day(iso: str) -> str:
     return f"{t:%b} {t.day}"
 
 
-def _chart(points: list[list], start_cash: float) -> str:
-    if len(points) < 2:
-        return '<p class="muted">The equity chart appears after the second scan.</p>'
+def _line_chart(values: list[float], hover_labels: list[str], hover_values: list[str], ticks: list[tuple[int, str]],
+                axis_format, baseline: float, baseline_label: str, aria: str, pad_floor: float) -> str:
+    """One-series line chart with a dashed reference line and a hover crosshair (see CHART_JS)."""
     W, H, L, R, T, B = 800, 260, 56, 12, 12, 28
-    values = [v for _, v in points] + [start_cash]
-    lo, hi = min(values), max(values)
-    pad = max((hi - lo) * 0.15, start_cash * 0.005)
+    lo, hi = min(values + [baseline]), max(values + [baseline])
+    pad = max((hi - lo) * 0.15, pad_floor)
     lo, hi = lo - pad, hi + pad
 
     def x(i: int) -> float:
-        return L + (W - L - R) * i / (len(points) - 1)
+        return L + (W - L - R) * i / (len(values) - 1)
 
     def y(v: float) -> float:
         return T + (H - T - B) * (1 - (v - lo) / (hi - lo))
 
-    grid = []
-    for k in range(5):
-        v = lo + (hi - lo) * k / 4
-        grid.append(
-            f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="var(--grid)"/>'
-            f'<text x="{L - 8}" y="{y(v) + 4:.1f}" text-anchor="end">{_money(v, False)}</text>'
-        )
-    # One x label per trading day, placed at that day's first scan.
-    labels, seen = [], set()
-    for i, (t, _) in enumerate(points):
-        day = t[:10]
-        if day not in seen:
-            seen.add(day)
-            labels.append((x(i), _day(t)))
-    step = max(1, len(labels) // 8)
-    ticks = "".join(
-        f'<text x="{px:.1f}" y="{H - 8}" text-anchor="{"start" if n == 0 else "middle"}">{text}</text>'
-        for n, (px, text) in enumerate(labels) if n % step == 0
-    )
-    path = " ".join(f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for i, (_, v) in enumerate(points))
-    data = [[round(x(i), 1), round(y(v), 1), _money(v), _when(t)] for i, (t, v) in enumerate(points)]
-    base = y(start_cash)
+    grid = "".join(
+        f'<line x1="{L}" x2="{W - R}" y1="{y(lo + (hi - lo) * k / 4):.1f}" y2="{y(lo + (hi - lo) * k / 4):.1f}" stroke="var(--grid)"/>'
+        f'<text x="{L - 8}" y="{y(lo + (hi - lo) * k / 4) + 4:.1f}" text-anchor="end">{axis_format(lo + (hi - lo) * k / 4)}</text>'
+        for k in range(5))
+    tick_html = "".join(
+        f'<text x="{x(i):.1f}" y="{H - 8}" text-anchor="{"start" if n == 0 else "middle"}">{escape(text)}</text>'
+        for n, (i, text) in enumerate(ticks))
+    path = " ".join(f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for i, v in enumerate(values))
+    data = [[round(x(i), 1), round(y(v), 1), hover_values[i], hover_labels[i]] for i, v in enumerate(values)]
+    base = y(baseline)
     return (
-        f'<div id="chart" data-points="{escape(json.dumps(data))}">'
-        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Portfolio value over time" '
-        f'font-size="11" fill="var(--muted)">{"".join(grid)}{ticks}'
+        f'<div class="linechart" data-points="{escape(json.dumps(data))}">'
+        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(aria)}" font-size="11" fill="var(--muted)">'
+        f'{grid}{tick_html}'
         f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>'
-        f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">Starting {_money(start_cash, False)}</text>'
+        f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">{escape(baseline_label)}</text>'
         f'<path d="{path}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>'
-        f'<line id="xh" y1="{T}" y2="{H - B}" stroke="var(--axis)" style="display:none"/>'
-        f'<circle id="xd" r="5" fill="var(--series)" stroke="var(--surface)" stroke-width="2" style="display:none"/>'
-        f'</svg><div id="tip"></div></div>'
+        f'<line class="xh" y1="{T}" y2="{H - B}" stroke="var(--axis)" style="display:none"/>'
+        f'<circle class="xd" r="5" fill="var(--series)" stroke="var(--surface)" stroke-width="2" style="display:none"/>'
+        f'</svg><div class="tip"></div></div>'
     )
+
+
+def _chart(points: list[list], start_cash: float) -> str:
+    """Account value at each scan, against the starting cash."""
+    if len(points) < 2:
+        return '<p class="muted">The equity chart appears after the second scan.</p>'
+    ticks, seen = [], set()
+    for i, (t, _) in enumerate(points):  # one label per trading day, at that day's first scan
+        if t[:10] not in seen:
+            seen.add(t[:10])
+            ticks.append((i, _day(t)))
+    ticks = ticks[::max(1, len(ticks) // 8)]
+    values = [v for _, v in points]
+    return _line_chart(values, [_when(t) for t, _ in points], [_money(v) for v in values], ticks,
+                       lambda v: _money(v, False), start_cash, f"Starting {_money(start_cash, False)}",
+                       "Account value over time", start_cash * 0.005)
 
 
 def _lines(reasons: list[str]) -> str:
@@ -393,7 +398,8 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 
 
 def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: set[str],
-                info: dict[str, Any], regime: dict[str, Any]) -> tuple[str, bool]:
+                info: dict[str, Any], regime: dict[str, Any],
+                limits: tuple[int, int, str | None] | None = None) -> tuple[str, bool]:
     """Why a flagged contract is or is not in the portfolio, and whether it is buy grade."""
     held = {p["symbol"] for p in state["positions"]}
     held_tickers = {p["ticker"] for p in state["positions"]}
@@ -408,12 +414,13 @@ def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: s
         return f"Buy grade · holding {row['ticker']}", True
     if row["ticker"] in resting:
         return "Buy grade · cooling off", True
-    if len(state["positions"]) >= cfg["sim_max_positions"]:
+    max_positions, max_same_way, _ = limits or (cfg["sim_max_positions"], cfg["sim_max_same_direction"], None)
+    if len(state["positions"]) >= max_positions:
         return "Buy grade · slots full", True
     blocked = portfolio.entry_block(row, info, regime, cfg)
     if blocked:
         return f"Buy grade · {blocked}", True
-    if sum(1 for p in state["positions"] if p["type"] == row["type"]) >= cfg["sim_max_same_direction"]:
+    if sum(1 for p in state["positions"] if p["type"] == row["type"]) >= max_same_way:
         return f"Buy grade · enough {row['type']}s held", True
     if row["ask"] * 100 + cfg["sim_commission"] > state["cash"]:
         return "Buy grade · no cash", True
@@ -597,12 +604,13 @@ def _rotation_table(rot: dict[str, Any]) -> str:
 def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
     contracts, tickers = result["contracts"], result["tickers"]
     regime = portfolio.market_regime(result, cfg)
+    limits = portfolio.exposure_limits(result, cfg)
     cutoff = (datetime.now() - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
 
     rows, buy_grade = [], 0
     for _, r in contracts.iterrows():
-        status, grade = _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)
+        status, grade = _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime, limits)
         buy_grade += grade
         spread = "n/a" if r["spread_pct"] != r["spread_pct"] else f"{r['spread_pct']:.1f}%"
         ratio = "n/a" if r["iv_hv"] != r["iv_hv"] else f"{r['iv_hv']:.2f}"
@@ -968,6 +976,84 @@ def _promising_rows(rows: list[tuple[Any, str]], tickers: dict[str, Any]) -> str
     return "".join(out)
 
 
+def _regime_section(model: dict[str, Any] | None, limits: tuple[int, int, str | None]) -> str:
+    """Market regime: risk score and state, its components, warnings with their record, the odds
+    in each state since 2008, and the sectors it favours."""
+    if not model:
+        return '<p class="muted">The market regime could not be read on this scan.</p>'
+    odds = model["odds"]
+    state_tiles = [
+        ("Risk regime", escape(model["state"].capitalize()), f"risk score {model['score']:+.0f}, "
+                                                            f"{model['change']:+.0f} over 10 sessions"),
+        ("Odds of a 5%+ drop within a month", _pct(odds.get("drop_odds"), 0),
+         f"usually {model['base_drop']:.0%} (all days since {model['since'][:4]})"),
+        ("SPY's average next month", _pct(odds.get("spy_return"), 2, signed=True),
+         f"up {_pct(odds.get('spy_up'), 0)} of the time in this state"),
+        ("Account exposure", f"{limits[0]} positions max", escape(limits[2]) if limits[2] else "full: risk is normal"),
+    ]
+    tiles = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+                    for k, v, d in state_tiles)
+
+    path = model.get("path") or []
+    chart = ""
+    if len(path) > 2:
+        months, seen = [], set()
+        for i, (d, _) in enumerate(path):
+            if d[:7] not in seen:
+                seen.add(d[:7])
+                months.append((i, datetime.fromisoformat(d).strftime("%b")))
+        chart = _line_chart([v for _, v in path], [_day(d) for d, _ in path], [f"{v:+.0f}" for _, v in path],
+                            months[::max(1, len(months) // 12)], lambda v: f"{v:+.0f}", 0.0, "Neutral",
+                            "Risk score over the past year", 5.0)
+
+    rows = []
+    for key, value in model["components"].items():
+        width = min(abs(value) / 2.5, 1) * 50
+        left = 50 if value >= 0 else 50 - width
+        colour = "var(--series)" if value >= 0 else "var(--bad)"
+        rows.append(
+            f'<tr><td>{escape(regime.COMPONENTS.get(key, key))}</td><td class="num">{"▲" if value >= 0 else "▼"} {value:+.2f}</td>'
+            f'<td style="width:40%"><div class="dbar"><span style="left:{left:.0f}%;width:{width:.0f}%;'
+            f'background:{colour}"></span><i></i></div></td></tr>')
+    components = ('<div class="panel scroll"><table><thead><tr><th>Component</th><th>Reading</th><th>Risk-off ← → Risk-on</th>'
+                  f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+                  '<p class="muted small">Each reading is standard deviations from its own past year, capped at ±2.5. '
+                  'Breadth has no free history, so it is shown and can raise a warning but is not part of the score.</p>')
+
+    warnings = "".join(f"<li>⚠ {escape(w)}</li>" for w in model["warnings"]) or "<li>No warning signals right now.</li>"
+    state_rows = "".join(
+        f'<tr><td>{escape(name.capitalize())}{" (now)" if name == model["state"] else ""}</td>'
+        f'<td class="num">{s["days"]:,}</td><td class="num">{s["drop_odds"]:.0%}</td>'
+        f'<td class="num">{s["spy_return"]:+.2%}</td><td class="num">{s["spy_up"]:.0%}</td>'
+        f'<td>{escape(max(s["next_state"], key=s["next_state"].get).capitalize())} '
+        f'({max(s["next_state"].values()):.0%})</td></tr>'
+        for name, s in sorted(model["all_states"].items()))
+
+    def sector_list(items, empty):
+        if not items:
+            return f'<p class="muted small">{empty}</p>'
+        return "<ul>" + "".join(
+            f'<li><b>{escape(i["sector"])} ({i["etf"]})</b>: {i["edge"]:+.1%} a month against SPY in this state, '
+            f'now {escape(i["quadrant"])} on the rotation graph</li>' for i in items) + "</ul>"
+
+    return f"""<div class="tiles">{tiles}</div>
+<div class="panel" style="margin-top:12px"><h4 style="margin:0 0 6px">Risk score, past year (above 0 is risk-on)</h4>{chart}</div>
+<h2>What the regime is made of</h2>{components}
+<h2>Warning signs</h2><div class="panel"><ul class="plain">{warnings}</ul>
+<p class="muted small">Each warning shows what followed it historically. Some signal danger (VIX above VIX3M saw a 5%+ drop
+about twice as often as usual), others mostly a stall in returns; none is a sure thing.</p></div>
+<h2>The four states since {model["since"][:4]}</h2><div class="panel scroll"><table><thead><tr><th>State</th><th>Days</th>
+<th>5%+ drop within a month</th><th>SPY&#39;s average month</th><th>SPY up after a month</th><th>Most often a month later</th>
+</tr></thead><tbody>{state_rows}</tbody></table></div>
+<p class="muted small">The regime predicts risk better than direction: risk-off states saw big drops about twice as often,
+but SPY still rose on average afterwards. So the account holds fewer positions when risk is high rather than avoiding calls.</p>
+<h2>Sectors for this regime</h2><div class="cards"><div class="card"><h3>Favoured</h3>
+{sector_list(model["favoured"], "No sector both beat SPY in this state and is leading or improving now.")}</div>
+<div class="card"><h3>Avoid</h3>{sector_list(model["avoid"], "No sector both trailed SPY in this state and is lagging or weakening now.")}</div></div>
+<p class="muted small">Favoured sectors beat SPY on average in this state since 2008 and are leading or improving on the rotation
+graph now; they get a small boost in the sector read. The historical edges are small, about half a percent a month.</p>"""
+
+
 def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
     start, positions, closed = state["start_cash"], state["positions"], state["closed"]
     total = portfolio.equity(state)
@@ -989,7 +1075,7 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
         ("Closed trades", f"{wins} won, {len(closed) - wins} lost" if closed else "None yet",
          _delta(realised) + " realised" if closed else "since the start"),
         ("Largest drop from peak", f"{drawdown:.1%}", f"peak {_money(max(values))}"),
-        ("Market regime", regime_text, f"average read of {' and '.join(cfg['sim_regime_tickers'])}"),
+        ("Market direction", regime_text, f"average read of {' and '.join(cfg['sim_regime_tickers'])}"),
     ]
     tile_html = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
                         for k, v, d in tiles)
@@ -1011,9 +1097,10 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
     resting = {c["ticker"] for c in closed if c["exit_time"] > cutoff}
     live = contracts[~contracts["stale"]] if len(contracts) else contracts
     best = live.drop_duplicates("ticker") if len(live) else live
-    buyable = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)[0])
+    limits = portfolio.exposure_limits(result, cfg)
+    buyable = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime, limits)[0])
                for _, r in best.iterrows() if portfolio.entry_block(r, tickers[r["ticker"]], regime, cfg) is None][:8]
-    anywhere = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)[0])
+    anywhere = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime, limits)[0])
                 for _, r in best.head(8).iterrows()]
     heads = ("<tr><th>Score</th><th>Contract</th><th>Cost</th><th>OTM</th><th>Delta</th><th>Breakeven move</th>"
              "<th>Structural target</th><th>Market read</th><th>Status</th></tr>")
@@ -1025,6 +1112,7 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
                 f'<tbody>{_promising_rows(rows, tickers)}</tbody></table></div>')
 
     body = f"""<div class="tiles">{tile_html}</div>
+<h2>Market regime</h2>{_regime_section(result.get("regime_model"), portfolio.exposure_limits(result, cfg))}
 <h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div>
 <h2>Open positions</h2>{pos_table}
 <p class="small"><a href="portfolio.html">Full portfolio, with the reasoning and reviews for every trade</a></p>
