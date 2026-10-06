@@ -1016,42 +1016,21 @@ def _regime_section(model: dict[str, Any] | None, limits: tuple[int, int, str | 
             f'<td style="width:40%"><div class="dbar"><span style="left:{left:.0f}%;width:{width:.0f}%;'
             f'background:{colour}"></span><i></i></div></td></tr>')
     components = ('<div class="panel scroll"><table><thead><tr><th>Component</th><th>Reading</th><th>Risk-off ← → Risk-on</th>'
-                  f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
-                  '<p class="muted small">Each reading is standard deviations from its own past year, capped at ±2.5. '
-                  'Breadth has no free history, so it is shown and can raise a warning but is not part of the score.</p>')
+                  f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+    warnings = ('<div class="panel"><ul class="plain">' + "".join(f"<li>⚠ {escape(w)}</li>" for w in model["warnings"])
+                + "</ul></div>" if model["warnings"] else "")
 
-    warnings = "".join(f"<li>⚠ {escape(w)}</li>" for w in model["warnings"]) or "<li>No warning signals right now.</li>"
-    state_rows = "".join(
-        f'<tr><td>{escape(name.capitalize())}{" (now)" if name == model["state"] else ""}</td>'
-        f'<td class="num">{s["days"]:,}</td><td class="num">{s["drop_odds"]:.0%}</td>'
-        f'<td class="num">{s["spy_return"]:+.2%}</td><td class="num">{s["spy_up"]:.0%}</td>'
-        f'<td>{escape(max(s["next_state"], key=s["next_state"].get).capitalize())} '
-        f'({max(s["next_state"].values()):.0%})</td></tr>'
-        for name, s in sorted(model["all_states"].items()))
-
-    def sector_list(items, empty):
+    def sector_list(items):
         if not items:
-            return f'<p class="muted small">{empty}</p>'
-        return "<ul>" + "".join(
-            f'<li><b>{escape(i["sector"])} ({i["etf"]})</b>: {i["edge"]:+.1%} a month against SPY in this state, '
-            f'now {escape(i["quadrant"])} on the rotation graph</li>' for i in items) + "</ul>"
+            return '<p class="muted small">None right now.</p>'
+        return "<ul>" + "".join(f'<li><b>{escape(i["sector"])} ({i["etf"]})</b> · {escape(i["quadrant"])}</li>'
+                                for i in items) + "</ul>"
 
     return f"""<div class="tiles">{tiles}</div>
-<div class="panel" style="margin-top:12px"><h4 style="margin:0 0 6px">Risk score, past year (above 0 is risk-on)</h4>{chart}</div>
-<h2>What the regime is made of</h2>{components}
-<h2>Warning signs</h2><div class="panel"><ul class="plain">{warnings}</ul>
-<p class="muted small">Each warning shows what followed it historically. Some signal danger (VIX above VIX3M saw a 5%+ drop
-about twice as often as usual), others mostly a stall in returns; none is a sure thing.</p></div>
-<h2>The four states since {model["since"][:4]}</h2><div class="panel scroll"><table><thead><tr><th>State</th><th>Days</th>
-<th>5%+ drop within a month</th><th>SPY&#39;s average month</th><th>SPY up after a month</th><th>Most often a month later</th>
-</tr></thead><tbody>{state_rows}</tbody></table></div>
-<p class="muted small">The regime predicts risk better than direction: risk-off states saw big drops about twice as often,
-but SPY still rose on average afterwards. So the account holds fewer positions when risk is high rather than avoiding calls.</p>
-<h2>Sectors for this regime</h2><div class="cards"><div class="card"><h3>Favoured</h3>
-{sector_list(model["favoured"], "No sector both beat SPY in this state and is leading or improving now.")}</div>
-<div class="card"><h3>Avoid</h3>{sector_list(model["avoid"], "No sector both trailed SPY in this state and is lagging or weakening now.")}</div></div>
-<p class="muted small">Favoured sectors beat SPY on average in this state since 2008 and are leading or improving on the rotation
-graph now; they get a small boost in the sector read. The historical edges are small, about half a percent a month.</p>"""
+<div class="panel" style="margin-top:12px"><h4 style="margin:0 0 6px">Risk score, past year</h4>{chart}</div>
+{warnings}{components}
+<div class="cards" style="margin-top:12px"><div class="card"><h3>Favoured sectors</h3>{sector_list(model["favoured"])}</div>
+<div class="card"><h3>Sectors to avoid</h3>{sector_list(model["avoid"])}</div></div>"""
 
 
 def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
@@ -1112,6 +1091,7 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
                 f'<tbody>{_promising_rows(rows, tickers)}</tbody></table></div>')
 
     body = f"""<div class="tiles">{tile_html}</div>
+<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}
 <h2>Market regime</h2>{_regime_section(result.get("regime_model"), portfolio.exposure_limits(result, cfg))}
 <h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div>
 <h2>Open positions</h2>{pos_table}
@@ -1123,8 +1103,7 @@ not against the market regime unless its own read is at least ±{cfg['sim_counte
 account would buy it now or what it is waiting for.</p>
 <h2>Top setups at any price</h2>{table(anywhere)}
 <p class="muted small">The highest-scoring contract per stock, whatever it costs. <a href="scanner.html">Every flagged
-contract</a> is on the Scanner page.</p>
-<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}"""
+contract</a> is on the Scanner page.</p>"""
     sub = (f"Account health, the most promising contracts and where money is rotating. Last scan "
            f"{_when(result['scanned_at'].isoformat())} ET.")
     return _page("Home", sub, body, CHART_JS + TABLE_JS)
