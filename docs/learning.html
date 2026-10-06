@@ -62,10 +62,12 @@ td a{color:inherit}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
 .filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
 .card:target{outline:2px solid var(--series)}
+.dbar{position:relative;height:8px;background:var(--track);border-radius:4px}
+.dbar span{position:absolute;top:0;height:8px;border-radius:4px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:14px;background:var(--axis)}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
-#chart{position:relative}#chart svg{display:block;width:100%;height:auto}
-#tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+.linechart{position:relative}.linechart svg{display:block;width:100%;height:auto}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 footer{margin-top:40px;color:var(--muted);font-size:12px}
 </style></head>
