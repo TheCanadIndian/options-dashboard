@@ -1,4 +1,4 @@
-"""Static portfolio page for GitHub Pages, written to docs/index.html."""
+"""Static site pages for GitHub Pages, written to docs/."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import json
 import subprocess
 from datetime import date, datetime, timedelta
 from html import escape
+
+import numpy as np
 from typing import Any
 
-from . import earnings, portfolio, scorecard, structure, universe
+from . import config, earnings, portfolio, scorecard, structure, universe
 from .config import HOME
 
 OUT = HOME / "docs" / "index.html"
@@ -69,7 +71,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
 th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto}
-nav{display:flex;gap:6px;margin-bottom:16px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+main>*{min-width:0}
 nav a{padding:5px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
 nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
 td a{color:inherit}
@@ -371,8 +374,8 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
-        for name, href in (("Portfolio", "index.html"), ("Scanner", "scanner.html"), ("Earnings", "earnings.html"),
-                           ("Learning", "learning.html"))
+        for name, href in (("Home", "index.html"), ("Portfolio", "portfolio.html"), ("Scanner", "scanner.html"),
+                           ("Earnings", "earnings.html"), ("Learning", "learning.html"))
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -701,8 +704,8 @@ at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
     return _page("Scanner", sub, body, TABLE_JS)
 
 
-TITLES = {"Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner", "Earnings": "Earnings Outlook",
-          "Learning": "What's Working"}
+TITLES = {"Home": "Options Dashboard", "Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner",
+          "Earnings": "Earnings Outlook", "Learning": "What's Working"}
 LEANS = {"bullish": "▲ Bullish", "bearish": "▼ Bearish", "neutral": "• Neutral"}
 
 
@@ -946,10 +949,104 @@ Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): {"n/a" 
     return _page("Learning", sub, body, TABLE_JS)
 
 
+def _promising_rows(rows: list[tuple[Any, str]], tickers: dict[str, Any]) -> str:
+    out = []
+    for r, status in rows:
+        info = tickers[r["ticker"]]
+        expiry = datetime.strptime(r["expiration"], "%Y-%m-%d")
+        target = (f'{escape(r["target_label"])} ${r["target_price"]:.2f}' if isinstance(r.get("target_label"), str)
+                  else "none")
+        out.append(
+            "<tr>" + _cell(r["score"], f'{r["score"]:.0f}')
+            + _cell(r["ticker"], f'<a href="scanner.html#read-{escape(r["ticker"])}">{escape(r["ticker"])}</a> '
+                                 f'${r["strike"]:g} {r["type"]} {expiry:%b} {expiry.day}', False)
+            + _cell(r["cost"], _money(r["cost"], False)) + _cell(r["moneyness"], f'{r["moneyness"]:+.1%}')
+            + _cell(r["delta"], f'{r["delta"]:+.2f}') + _cell(r["breakeven_move"], f'{r["breakeven_move"]:.1%}')
+            + _cell(r.get("target_label") or "", target, False)
+            + _cell(info["trend"], f'{LEANS[info["bias"]][0]} {info["trend"]:+.0f}')
+            + _cell(status, escape(status), False) + "</tr>")
+    return "".join(out)
+
+
+def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
+    start, positions, closed = state["start_cash"], state["positions"], state["closed"]
+    total = portfolio.equity(state)
+    values = [v for _, v in state["equity"]] or [start]
+    peak, drawdown = values[0], 0.0
+    for v in values:
+        peak = max(peak, v)
+        drawdown = min(drawdown, v / peak - 1)
+    wins = sum(c["pnl"] > 0 for c in closed)
+    realised = sum(c["pnl"] for c in closed)
+    regime = portfolio.market_regime(result, cfg)
+    calls = sum(p["type"] == "call" for p in positions)
+    regime_text = ("unknown" if regime["score"] is None else
+                   f'{LEANS.get(regime["label"], regime["label"])} {regime["score"]:+.0f}')
+    tiles = [
+        ("Account value", _money(total), _delta(total - start, total / start - 1) + " since the start"),
+        ("Cash", _money(state["cash"]), f"{state['cash'] / total:.0%} of the account"),
+        ("Open positions", f"{len(positions)} of {cfg['sim_max_positions']}", f"{calls} calls, {len(positions) - calls} puts"),
+        ("Closed trades", f"{wins} won, {len(closed) - wins} lost" if closed else "None yet",
+         _delta(realised) + " realised" if closed else "since the start"),
+        ("Largest drop from peak", f"{drawdown:.1%}", f"peak {_money(max(values))}"),
+        ("Market regime", regime_text, f"average read of {' and '.join(cfg['sim_regime_tickers'])}"),
+    ]
+    tile_html = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+                        for k, v, d in tiles)
+
+    pos_rows = "".join(
+        f'<tr><td>{escape(p["label"])}</td><td class="num">{_money(p["entry_price"])}</td>'
+        f'<td class="num">{_money(p["last_bid"])}</td>'
+        f'<td class="num">{_delta((p["last_bid"] - p["entry_price"]) * 100, p["last_bid"] / p["entry_price"] - 1)}</td>'
+        f'<td class="num">{int(np.busday_count(p["opened"][:10], date.today()))}</td>'
+        f'<td class="num">{_money(p["stop_price"])}</td><td class="num">{_money(p["target_price"])}</td></tr>'
+        for p in positions)
+    pos_table = (
+        '<div class="panel scroll"><table><thead><tr><th>Position</th><th>Paid</th><th>Bid now</th><th>P/L</th>'
+        f'<th>Days held</th><th>Stop</th><th>Target</th></tr></thead><tbody>{pos_rows}</tbody></table></div>'
+        if positions else '<p class="muted">No open positions.</p>')
+
+    contracts, tickers = result["contracts"], result["tickers"]
+    cutoff = (datetime.now() - timedelta(days=cfg["sim_reentry_days"])).isoformat()
+    resting = {c["ticker"] for c in closed if c["exit_time"] > cutoff}
+    live = contracts[~contracts["stale"]] if len(contracts) else contracts
+    best = live.drop_duplicates("ticker") if len(live) else live
+    buyable = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)[0])
+               for _, r in best.iterrows() if portfolio.entry_block(r, tickers[r["ticker"]], regime, cfg) is None][:8]
+    anywhere = [(r, _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)[0])
+                for _, r in best.head(8).iterrows()]
+    heads = ("<tr><th>Score</th><th>Contract</th><th>Cost</th><th>OTM</th><th>Delta</th><th>Breakeven move</th>"
+             "<th>Structural target</th><th>Market read</th><th>Status</th></tr>")
+
+    def table(rows):
+        if not rows:
+            return '<p class="muted">Nothing qualifies on this scan.</p>'
+        return (f'<div class="panel scroll"><table class="sortable"><thead>{heads}</thead>'
+                f'<tbody>{_promising_rows(rows, tickers)}</tbody></table></div>')
+
+    body = f"""<div class="tiles">{tile_html}</div>
+<h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div>
+<h2>Open positions</h2>{pos_table}
+<p class="small"><a href="portfolio.html">Full portfolio, with the reasoning and reviews for every trade</a></p>
+<h2>Promising contracts the account could buy</h2>{table(buyable)}
+<p class="muted small">The best contract per stock that passes the account&#39;s entry rules: within the
+{_money(config.max_premium(cfg), False)} per-trade limit, a bid/ask spread of {cfg['sim_max_entry_spread']:g}% or less, and
+not against the market regime unless its own read is at least ±{cfg['sim_counter_trend_min']}. Status says whether the
+account would buy it now or what it is waiting for.</p>
+<h2>Top setups at any price</h2>{table(anywhere)}
+<p class="muted small">The highest-scoring contract per stock, whatever it costs. <a href="scanner.html">Every flagged
+contract</a> is on the Scanner page.</p>
+<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}"""
+    sub = (f"Account health, the most promising contracts and where money is rotating. Last scan "
+           f"{_when(result['scanned_at'].isoformat())} ET.")
+    return _page("Home", sub, body, CHART_JS + TABLE_JS)
+
+
 def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(render(state, cfg), encoding="utf-8")
+    OUT.with_name("portfolio.html").write_text(render(state, cfg), encoding="utf-8")
     if result is not None:
+        OUT.write_text(render_home(result, state, cfg), encoding="utf-8")
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")
         OUT.with_name("earnings.html").write_text(render_earnings(result, cfg), encoding="utf-8")
     OUT.with_name("learning.html").write_text(render_learning(scorecard.load(), cfg), encoding="utf-8")
