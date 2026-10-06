@@ -26,10 +26,12 @@ LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15,
 CSS = """
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
 --grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
---track:#e1e0d9;--q-lead:#1baf7a;--q-weak:#eda100;--q-lag:#e34948;--q-imp:#2a78d6}
+--track:#e1e0d9;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;
+--s8:#e34948;--q-lead:#1baf7a;--q-weak:#eda100;--q-lag:#e34948;--q-imp:#2a78d6}
 @media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
 --ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
---series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835;--q-lead:#199e70;--q-weak:#c98500;
+--series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835;--s1:#3987e5;--s2:#d95926;--s3:#199e70;
+--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;--q-lead:#199e70;--q-weak:#c98500;
 --q-lag:#e66767;--q-imp:#3987e5}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -379,8 +381,8 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
-        for name, href in (("Home", "index.html"), ("Portfolio", "portfolio.html"), ("Scanner", "scanner.html"),
-                           ("Earnings", "earnings.html"), ("Learning", "learning.html"))
+        for name, href in (("Home", "index.html"), ("Portfolio", "portfolio.html"), ("Strategies", "strategies.html"),
+                           ("Scanner", "scanner.html"), ("Earnings", "earnings.html"), ("Learning", "learning.html"))
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -712,7 +714,8 @@ at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
     return _page("Scanner", sub, body, TABLE_JS)
 
 
-TITLES = {"Home": "Options Dashboard", "Portfolio": "Options Paper Portfolio", "Scanner": "Options Scanner",
+TITLES = {"Home": "Options Dashboard", "Portfolio": "Options Paper Portfolio", "Strategies": "Strategy Race",
+          "Scanner": "Options Scanner",
           "Earnings": "Earnings Outlook", "Learning": "What's Working"}
 LEANS = {"bullish": "▲ Bullish", "bearish": "▼ Bearish", "neutral": "• Neutral"}
 
@@ -1109,9 +1112,145 @@ contract</a> is on the Scanner page.</p>"""
     return _page("Home", sub, body, CHART_JS + TABLE_JS)
 
 
+MULTI_JS = """
+document.querySelectorAll('.multichart').forEach(function(el){var d=JSON.parse(el.dataset.chart),
+svg=el.querySelector('svg'),line=svg.querySelector('.xh'),tip=el.querySelector('.tip');
+function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,
+vx=cx/r.width*800,best=0,gap=1e9;for(var i=0;i<d.x.length;i++){var g=Math.abs(d.x[i]-vx);if(g<gap){gap=g;best=i}}
+line.setAttribute('x1',d.x[best]);line.setAttribute('x2',d.x[best]);line.style.display='';
+tip.innerHTML='<b>'+d.labels[best]+'</b>'+d.rows[best];tip.style.display='block';var x=d.x[best]/800*r.width;
+tip.style.left=Math.min(Math.max(x+12,0),r.width-tip.offsetWidth)+'px';tip.style.top='8px'}
+function out(){line.style.display='none';tip.style.display='none'}
+svg.addEventListener('mousemove',move);svg.addEventListener('touchstart',move,{passive:true});
+svg.addEventListener('touchmove',move,{passive:true});svg.addEventListener('mouseleave',out)});
+"""
+SERIES_TOKENS = [f"--s{i}" for i in range(1, 9)]
+
+
+def _multi_chart(series: list[tuple[str, list[list]]], start_cash: float) -> str:
+    """Every account's value over time on one axis, coloured in a fixed order, with a legend."""
+    times = sorted({t for _, pts in series for t, _ in pts})
+    if len(times) < 2:
+        return '<p class="muted">The chart appears after the second scan.</p>'
+    W, H, L, R, T, B = 800, 300, 60, 12, 12, 28
+    values = [v for _, pts in series for _, v in pts] + [start_cash]
+    lo, hi = min(values), max(values)
+    pad = max((hi - lo) * 0.12, start_cash * 0.005)
+    lo, hi = lo - pad, hi + pad
+    index = {t: i for i, t in enumerate(times)}
+
+    def x(i: int) -> float:
+        return L + (W - L - R) * i / (len(times) - 1)
+
+    def y(v: float) -> float:
+        return T + (H - T - B) * (1 - (v - lo) / (hi - lo))
+
+    parts = []
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y(v):.1f}" y2="{y(v):.1f}" stroke="var(--grid)"/>'
+                     f'<text x="{L - 8}" y="{y(v) + 4:.1f}" text-anchor="end">{_money(v, False)}</text>')
+    seen, ticks = set(), []
+    for t in times:
+        if t[:10] not in seen:
+            seen.add(t[:10])
+            ticks.append((index[t], _day(t)))
+    for n, (i, text) in enumerate(ticks[::max(1, len(ticks) // 8)]):
+        parts.append(f'<text x="{x(i):.1f}" y="{H - 8}" text-anchor="{"start" if n == 0 else "middle"}">{text}</text>')
+    base = y(start_cash)
+    parts.append(f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>')
+    for n, (name, pts) in enumerate(series):
+        d = " ".join(f"{'M' if j == 0 else 'L'}{x(index[t]):.1f},{y(v):.1f}" for j, (t, v) in enumerate(pts))
+        parts.append(f'<path d="{d}" fill="none" stroke="var({SERIES_TOKENS[n % 8]})" stroke-width="2" '
+                     f'stroke-linejoin="round"><title>{escape(name)}</title></path>')
+    parts.append(f'<line class="xh" y1="{T}" y2="{H - B}" stroke="var(--axis)" style="display:none"/>')
+
+    lookup = [{t: v for t, v in pts} for _, pts in series]
+    rows = []
+    for t in times:
+        here = sorted(((lookup[n].get(t), name, n) for n, (name, _) in enumerate(series) if t in lookup[n]),
+                      key=lambda r: -r[0])
+        rows.append("".join(f'<br><i style="display:inline-block;width:8px;height:8px;border-radius:2px;'
+                            f'background:var({SERIES_TOKENS[n % 8]});margin-right:5px"></i>{escape(name)} {_money(v)}'
+                            for v, name, n in here))
+    chart = {"x": [round(x(i), 1) for i in range(len(times))], "labels": [_when(t) for t in times], "rows": rows}
+    legend = "".join(f'<span><i style="background:var({SERIES_TOKENS[n % 8]})"></i>{escape(name)}</span>'
+                     for n, (name, _) in enumerate(series))
+    return (f'<div class="legend">{legend}</div><div class="multichart linechart" data-chart="{escape(json.dumps(chart))}">'
+            f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Each account&#39;s value over time" font-size="11" '
+            f'fill="var(--muted)">{"".join(parts)}</svg><div class="tip"></div></div>')
+
+
+def _account_stats(state: dict[str, Any]) -> dict[str, Any]:
+    total = portfolio.equity(state)
+    closed = state["closed"]
+    values = [v for _, v in state["equity"]] or [state["start_cash"]]
+    peak, drop = values[0], 0.0
+    for v in values:
+        peak = max(peak, v)
+        drop = min(drop, v / peak - 1)
+    wins = sum(c["pnl"] > 0 for c in closed)
+    return {"value": total, "return": total / state["start_cash"] - 1, "realised": sum(c["pnl"] for c in closed),
+            "closed": len(closed), "wins": wins, "win_rate": wins / len(closed) if closed else None,
+            "avg": sum(c["pnl"] for c in closed) / len(closed) if closed else None, "open": len(state["positions"]),
+            "drop": drop, "started": state["started"]}
+
+
+def render_strategies(cfg: dict[str, Any]) -> str:
+    accounts = portfolio.accounts(cfg)
+    states = {a["id"]: portfolio.load(portfolio.account_cfg(cfg, a["id"]), a["id"]) for a in accounts}
+    stats = {k: _account_stats(s) for k, s in states.items()}
+    ranked = sorted(accounts, key=lambda a: -stats[a["id"]]["value"])
+
+    rows = "".join(
+        "<tr>" + _cell(n, str(n)) + _cell(a["name"], f'<a href="#acct-{a["id"]}"><b>{escape(a["name"])}</b></a>'
+                                       f'<br><span class="muted small">{escape(a["summary"])}</span>', False)
+        + _cell(st["value"], _money(st["value"])) + _cell(st["return"], _delta(st["value"] - states[a["id"]]["start_cash"], st["return"]))
+        + _cell(st["realised"], _signed(st["realised"]) if st["closed"] else "–")
+        + _cell(st["closed"], f'{st["wins"]}–{st["closed"] - st["wins"]}' if st["closed"] else "0")
+        + _cell(st["win_rate"] or -1, _pct(st["win_rate"], 0)) + _cell(st["avg"] or 0, _signed(st["avg"]) if st["avg"] is not None else "–")
+        + _cell(st["open"], str(st["open"])) + _cell(st["drop"], f'{st["drop"]:.1%}')
+        + _cell(st["started"], _day(st["started"])) + "</tr>"
+        for n, (a, st) in enumerate(((a, stats[a["id"]]) for a in ranked), 1))
+    table = ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Rank</th><th>Strategy</th><th>Value</th>'
+             '<th>Return</th><th>Realised P/L</th><th>Won–lost</th><th>Win rate</th><th>Average closed trade</th>'
+             f'<th>Open</th><th>Largest drop</th><th>Started</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+    chart = _multi_chart([(a["name"], states[a["id"]]["equity"]) for a in accounts], float(cfg["account_size"]))
+
+    cards = []
+    for a in accounts:
+        s, st = states[a["id"]], stats[a["id"]]
+        rules = "".join(f"<li>{escape(k.replace('sim_', '').replace('_', ' '))}: {escape(str(v))}</li>"
+                        for k, v in a["rules"].items()) or "<li>The shared settings, unchanged</li>"
+        open_rows = "".join(
+            f'<li>{escape(p["label"])}: paid {_money(p["entry_price"])}, bid {_money(p["last_bid"])} '
+            f'{_delta((p["last_bid"] - p["entry_price"]) * 100, p["last_bid"] / p["entry_price"] - 1)}</li>'
+            for p in s["positions"]) or '<li class="muted">None</li>'
+        closed_rows = "".join(
+            f'<li>{escape(c["label"])}: {_delta(c["pnl"], c["ret"])} · {escape(c["exit_reason"])}</li>'
+            for c in reversed(s["closed"][-6:])) or '<li class="muted">None yet</li>'
+        cards.append(
+            f'<article class="card" id="acct-{a["id"]}"><header><h3>{escape(a["name"])}</h3>'
+            f'<div class="pl">{_delta(st["value"] - s["start_cash"], st["return"])}</div></header>'
+            f'<p class="small muted">{escape(a["summary"])}</p>'
+            f'<details><summary>Rules, positions and trades</summary><h4>Rule changes from the shared settings</h4>'
+            f'<ul>{rules}</ul><h4>Open positions</h4><ul>{open_rows}</ul><h4>Latest closed trades</h4>'
+            f'<ul>{closed_rows}</ul></details></article>')
+
+    body = f"""<h2>Leaderboard</h2>{table}
+<h2>Value over time</h2><div class="panel">{chart}</div>
+<h2>Each strategy</h2><div class="cards">{"".join(cards)}</div>
+<p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the
+same moments, so differences come from the rules. Weeks of trades are needed before a lead means much.</p>"""
+    return _page("Strategies", "Several simulated accounts, each trying different rules on the same scans.", body,
+                 TABLE_JS + MULTI_JS)
+
+
 def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
     OUT.with_name("portfolio.html").write_text(render(state, cfg), encoding="utf-8")
+    OUT.with_name("strategies.html").write_text(render_strategies(cfg), encoding="utf-8")
     if result is not None:
         OUT.write_text(render_home(result, state, cfg), encoding="utf-8")
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")

@@ -30,7 +30,7 @@ DEFAULTS: dict[str, Any] = {
     "account_size": 1000.0,
     "risk_per_trade_pct": 15.0,  # max premium per contract as % of account
     "min_dte": 21,
-    "max_dte": 60,
+    "max_dte": 90,  # scanner window; each simulated account narrows it with sim_min_dte / sim_max_dte
     "min_delta": 0.15,  # low enough to include out-of-the-money strikes
     "max_delta": 0.70,
     "min_open_interest": 100,
@@ -56,6 +56,11 @@ DEFAULTS: dict[str, Any] = {
     # (spreads are widest in the first 15 minutes) and before the close
     "sim_review_times": ["09:45", "15:30"],
     "sim_max_positions": 5,
+    "sim_min_dte": 21,  # expiries this account buys
+    "sim_max_dte": 60,
+    "sim_min_moneyness": None,  # e.g. 0.02 buys only contracts at least 2% out of the money
+    "sim_use_regime": True,  # market direction filter and regime position limits
+    "sim_skip_avoided_sectors": False,  # skip sectors the market regime says to avoid
     # Market regime: the average combined read of these tickers. Beyond +/- the threshold, trades
     # against it need a read at least this strong on their own stock.
     "sim_regime_tickers": ["SPY", "QQQ"],
@@ -75,6 +80,26 @@ DEFAULTS: dict[str, Any] = {
     "sim_commission": 0.65,  # per contract, each way
     "sim_reentry_days": 2,  # wait this long before re-buying a ticker after selling it
     "site_push": True,  # commit and push docs/ to GitHub after each scan
+    # Simulated accounts, each starting with account_size and trading the same scans under its own
+    # rules. "core" is the main account shown on the Portfolio page; the rest only change the settings
+    # listed in "rules".
+    "accounts": [
+        {"id": "core", "name": "Core", "summary": "The current rules", "rules": {}},
+        {"id": "long_dated", "name": "Longer-dated", "summary": "45 to 90 days to expiry, for slower time decay",
+         "rules": {"sim_min_dte": 45, "sim_max_dte": 90}},
+        {"id": "wide_exits", "name": "Let winners run", "summary": "Exits at +100% or -50%",
+         "rules": {"sim_target_pct": 100.0, "sim_stop_pct": 50.0}},
+        {"id": "quick_exits", "name": "Quick exits", "summary": "Exits at +30% or -25%",
+         "rules": {"sim_target_pct": 30.0, "sim_stop_pct": 25.0}},
+        {"id": "high_conviction", "name": "High conviction", "summary": "Only buys at a score of 80 or more",
+         "rules": {"sim_min_score": 80}},
+        {"id": "otm", "name": "Out of the money", "summary": "Only contracts at least 2% out of the money",
+         "rules": {"sim_min_moneyness": 0.02}},
+        {"id": "no_regime", "name": "No market filter", "summary": "Ignores market direction and regime limits",
+         "rules": {"sim_use_regime": False}},
+        {"id": "skip_weak_sectors", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
+         "rules": {"sim_skip_avoided_sectors": True}},
+    ],
     "ntfy_topic": "",  # push notifications via ntfy.sh; empty = off
     "ntfy_server": "https://ntfy.sh",
     "discord_webhook": "",  # empty = off

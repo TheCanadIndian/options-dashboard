@@ -32,7 +32,10 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
     if log_paper:
         opened, marked = paper.update(result, cfg)
         print(f"Paper trades: {opened} opened, {marked} re-priced")
-        state = portfolio.update(result, cfg)
+        states = portfolio.run_all(result, cfg)
+        state = states["core"]
+        ranked = sorted(states.items(), key=lambda kv: -portfolio.equity(kv[1]))
+        print("Accounts: " + ", ".join(f"{k} ${portfolio.equity(v):,.0f}" for k, v in ranked))
         print(f"Portfolio: ${portfolio.equity(state):,.2f} "
               f"({len(state['positions'])} open, {len(state['closed'])} closed, cash ${state['cash']:,.2f})")
         logged = journal.record_scan(result, cfg)

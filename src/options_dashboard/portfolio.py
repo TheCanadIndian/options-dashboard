@@ -20,13 +20,28 @@ from . import config, data, learning
 from .config import HOME
 from .scanner import WEIGHTS
 
-FILE = HOME / "paper" / "portfolio.json"
+FILE = HOME / "paper" / "portfolio.json"  # the core account
+ACCOUNTS_DIR = HOME / "paper" / "accounts"  # every other account
 NEW_YORK = ZoneInfo("America/New_York")
 
 
-def load(cfg: dict[str, Any]) -> dict[str, Any]:
+def accounts(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    return cfg["accounts"]
+
+
+def account_cfg(cfg: dict[str, Any], account: str) -> dict[str, Any]:
+    """Settings for one account: the shared settings with its own rules on top."""
+    spec = next((a for a in cfg["accounts"] if a["id"] == account), None)
+    return {**cfg, **(spec["rules"] if spec else {})}
+
+
+def _path(account: str):
+    return FILE if account == "core" else ACCOUNTS_DIR / f"{account}.json"
+
+
+def load(cfg: dict[str, Any], account: str = "core") -> dict[str, Any]:
     try:
-        return json.loads(FILE.read_text(encoding="utf-8"))
+        return json.loads(_path(account).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         cash = float(cfg["account_size"])
         return {
@@ -36,9 +51,10 @@ def load(cfg: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _save(state: dict[str, Any]) -> None:
-    FILE.parent.mkdir(exist_ok=True)
-    FILE.write_text(json.dumps(state, indent=1), encoding="utf-8")
+def _save(state: dict[str, Any], account: str = "core") -> None:
+    path = _path(account)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=1), encoding="utf-8")
 
 
 def equity(state: dict[str, Any]) -> float:
@@ -231,21 +247,35 @@ def market_regime(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]
     return {"score": score, "label": label, "reads": reads}
 
 
-def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str, Any]) -> str | None:
+def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str, Any],
+                avoided: set[str] | None = None) -> str | None:
     """Why the account would not buy this contract on its own merits, or None if it could."""
     if row["cost"] > config.max_premium(cfg):
         return "over budget"
     if not (row["spread_pct"] <= cfg["sim_max_entry_spread"]):  # also catches a missing spread
         return "spread too wide"
-    against = ((regime["label"] == "bullish" and row["type"] == "put")
-               or (regime["label"] == "bearish" and row["type"] == "call"))
-    if against and abs(info["trend"]) < cfg["sim_counter_trend_min"]:
-        return "against the market"
+    if not cfg["sim_min_dte"] <= row["dte"] <= cfg["sim_max_dte"]:
+        return "outside its expiry range"
+    if cfg.get("sim_min_moneyness") is not None and row["moneyness"] < cfg["sim_min_moneyness"]:
+        return "not far enough out of the money"
+    if cfg.get("sim_skip_avoided_sectors") and avoided and info.get("levels", {}).get("sector") in avoided:
+        return "out-of-favour sector"
+    if cfg.get("sim_use_regime", True):
+        against = ((regime["label"] == "bullish" and row["type"] == "put")
+                   or (regime["label"] == "bearish" and row["type"] == "call"))
+        if against and abs(info["trend"]) < cfg["sim_counter_trend_min"]:
+            return "against the market"
     return None
+
+
+def avoided_sectors(result: dict[str, Any]) -> set[str]:
+    return {s["sector"] for s in (result.get("regime_model") or {}).get("avoid", [])}
 
 
 def exposure_limits(result: dict[str, Any], cfg: dict[str, Any]) -> tuple[int, int, str | None]:
     """Most positions in total and in one direction, and why they are reduced (None if they are not)."""
+    if not cfg.get("sim_use_regime", True):
+        return cfg["sim_max_positions"], cfg["sim_max_same_direction"], None
     model = result.get("regime_model") or {}
     odds = (model.get("odds") or {}).get("drop_odds")
     inverted = any("VIX is above VIX3M" in w for w in model.get("warnings", []))
@@ -278,6 +308,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
     cutoff = (datetime.fromisoformat(now) - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
     picks = contracts[(contracts["score"] >= cfg["sim_min_score"]) & ~contracts["stale"]]
+    avoided = avoided_sectors(result)
     bought = 0
 
     for _, row in picks.iterrows():  # already sorted best first
@@ -285,7 +316,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
             break
         ticker = row["ticker"]
         cost = float(row["ask"]) * 100 + cfg["sim_commission"]
-        if entry_block(row, result["tickers"][ticker], regime, cfg):
+        if entry_block(row, result["tickers"][ticker], regime, cfg, avoided):
             continue
         same_way = sum(1 for p in state["positions"] if p["type"] == row["type"])
         if same_way >= max_same_way:
@@ -324,9 +355,14 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
         })
 
 
-def update(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
-    """Apply one scan to the portfolio: manage exits, then look for new buys."""
-    state = load(cfg)
+def run_all(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Apply one scan to every account. Returns each account's state by id."""
+    return {a["id"]: update(result, account_cfg(cfg, a["id"]), a["id"]) for a in accounts(cfg)}
+
+
+def update(result: dict[str, Any], cfg: dict[str, Any], account: str = "core") -> dict[str, Any]:
+    """Apply one scan to one account: manage exits, then look for new buys. `cfg` is that account's settings."""
+    state = load(cfg, account)
     if not data.market_open():
         return state  # option quotes outside the session are too wide to trade or value against
     now = datetime.now().isoformat(timespec="seconds")
@@ -337,5 +373,5 @@ def update(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     _buy(state, result, now, cfg)
     state["updated"] = now
     state["equity"].append([now, round(equity(state), 2)])
-    _save(state)
+    _save(state, account)
     return state
