@@ -1216,13 +1216,25 @@ def render_strategies(cfg: dict[str, Any]) -> str:
              '<th>Return</th><th>Realised P/L</th><th>Won–lost</th><th>Win rate</th><th>Average closed trade</th>'
              f'<th>Open</th><th>Largest drop</th><th>Started</th></tr></thead><tbody>{rows}</tbody></table></div>')
 
-    chart = _multi_chart([(a["name"], states[a["id"]]["equity"]) for a in accounts], float(cfg["account_size"]))
+    def group_chart(group: str) -> str:
+        members = [a for a in accounts if a.get("group") in (group, "both")]
+        return _multi_chart([(a["name"], states[a["id"]]["equity"]) for a in members], float(cfg["account_size"]))
+
+    chart = (f'<h4 style="margin:0 0 8px">Rule changes</h4>{group_chart("rules")}'
+             f'<h4 style="margin:24px 0 8px">Scoring weights</h4>{group_chart("weights")}')
+
+    def describe(key: str, value: Any) -> str:
+        if key == "method_weights":
+            return "Market read weights: " + ", ".join(f"{METHOD_SHORT.get(k, k)} {v:.0%}" for k, v in value.items())
+        if key == "factor_weights":
+            return "Contract score weights: " + ", ".join(f"{FACTOR_NAMES.get(k, k).lower()} {v}" for k, v in value.items())
+        return f"{key.replace('sim_', '').replace('_', ' ')}: {value}"
 
     cards = []
     for a in accounts:
         s, st = states[a["id"]], stats[a["id"]]
-        rules = "".join(f"<li>{escape(k.replace('sim_', '').replace('_', ' '))}: {escape(str(v))}</li>"
-                        for k, v in a["rules"].items()) or "<li>The shared settings, unchanged</li>"
+        rules = "".join(f"<li>{escape(describe(k, v))}</li>" for k, v in a["rules"].items()) \
+            or "<li>The shared settings, unchanged</li>"
         open_rows = "".join(
             f'<li>{escape(p["label"])}: paid {_money(p["entry_price"])}, bid {_money(p["last_bid"])} '
             f'{_delta((p["last_bid"] - p["entry_price"]) * 100, p["last_bid"] / p["entry_price"] - 1)}</li>'
@@ -1242,7 +1254,7 @@ def render_strategies(cfg: dict[str, Any]) -> str:
 <h2>Value over time</h2><div class="panel">{chart}</div>
 <h2>Each strategy</h2><div class="cards">{"".join(cards)}</div>
 <p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the
-same moments, so differences come from the rules. Weeks of trades are needed before a lead means much.</p>"""
+same moments, so differences come from the rules. Every account only buys to open and sells to close.</p>"""
     return _page("Strategies", "Several simulated accounts, each trying different rules on the same scans.", body,
                  TABLE_JS + MULTI_JS)
 

@@ -18,7 +18,8 @@ import pandas as pd
 
 from . import config, data, learning
 from .config import HOME
-from .scanner import WEIGHTS
+from .scanner import FULL_CONVICTION, WEIGHTS
+from .structure import METHOD_WEIGHTS
 
 FILE = HOME / "paper" / "portfolio.json"  # the core account
 ACCOUNTS_DIR = HOME / "paper" / "accounts"  # every other account
@@ -290,6 +291,28 @@ def buys_today(state: dict[str, Any], today: str) -> int:
     return sum(1 for e in state["log"] if e["action"] == "BUY" and e["time"][:10] == today)
 
 
+def account_scores(contracts: pd.DataFrame, result: dict[str, Any], cfg: dict[str, Any]) -> pd.Series:
+    """Each contract's score under this account's weights (NaN where its market read would not
+    point the contract's way). Accounts without their own weights use the scanner's score.
+
+    Contracts only exist for tickers the scanner's own read gave a direction, so an account with
+    different read weights chooses among those; it cannot add tickers the scanner skipped.
+    """
+    fw, mw = cfg.get("factor_weights"), cfg.get("method_weights")
+    if not fw and not mw:
+        return contracts["score"]
+    fw = fw or learning.active("factors", WEIGHTS)
+    mw = mw or learning.active("methods", METHOD_WEIGHTS)
+    scores = []
+    for _, row in contracts.iterrows():
+        info = result["tickers"][row["ticker"]]
+        reading = {"type": row["type"], "factors": {k: row[f"f_{k}"] for k in WEIGHTS},
+                   "methods": {m["key"]: m["score"] for m in info["methods"]}}
+        s = learning.rescore(reading, fw, mw, cfg["min_trend_strength"], FULL_CONVICTION)
+        scores.append(np.nan if s is None else round(s, 1))
+    return pd.Series(scores, index=contracts.index, dtype=float)
+
+
 def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
     contracts = result["contracts"]
     if contracts.empty:
@@ -307,7 +330,9 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
     held = {p["ticker"] for p in state["positions"]}
     cutoff = (datetime.fromisoformat(now) - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
-    picks = contracts[(contracts["score"] >= cfg["sim_min_score"]) & ~contracts["stale"]]
+    scored = contracts.assign(account_score=account_scores(contracts, result, cfg))
+    picks = scored[(scored["account_score"] >= cfg["sim_min_score"]) & ~scored["stale"]]
+    picks = picks.sort_values("account_score", ascending=False)
     avoided = avoided_sectors(result)
     bought = 0
 
@@ -339,7 +364,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
             "last_bid": float(row["bid"]), "last_ask": entry, "last_spot": float(row["spot"]),
             "high_bid": float(row["bid"]), "low_bid": float(row["bid"]), "last_time": now,
             "marks": [[now, float(row["bid"])]],
-            "score": float(row["score"]), "trend": float(row["trend"]), "bias": row["bias"],
+            "score": float(row["account_score"]), "trend": float(row["trend"]), "bias": row["bias"],
             "points": {k: float(row[f"pts_{k}"]) for k in WEIGHTS}, "weights": learning.active("factors", WEIGHTS),
             "methods": info["methods"], "levels": info["levels"],
             "trend_reasons": info["reasons"], "contract_notes": _contract_notes(row, cfg),
@@ -351,7 +376,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
         held.add(ticker)
         state["log"].append({
             "time": now, "action": "BUY", "symbol": pos["symbol"], "label": pos["label"],
-            "price": entry, "note": f"score {row['score']:.0f}, {row['bias']} trend",
+            "price": entry, "note": f"score {row['account_score']:.0f}, {row['bias']} trend",
         })
 
 

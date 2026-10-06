@@ -81,24 +81,47 @@ DEFAULTS: dict[str, Any] = {
     "sim_reentry_days": 2,  # wait this long before re-buying a ticker after selling it
     "site_push": True,  # commit and push docs/ to GitHub after each scan
     # Simulated accounts, each starting with account_size and trading the same scans under its own
-    # rules. "core" is the main account shown on the Portfolio page; the rest only change the settings
-    # listed in "rules".
+    # rules. All of them only buy to open (long calls and puts) and sell to close. "core" is the main
+    # account shown on the Portfolio page; the rest only change the settings listed in "rules".
+    # "group" decides which chart an account appears in on the Strategies page. Rules may set
+    # "factor_weights" (contract score, out of 100) and "method_weights" (market read, summing to 1);
+    # each contract is then re-scored from its raw readings with those weights.
     "accounts": [
-        {"id": "core", "name": "Core", "summary": "The current rules", "rules": {}},
-        {"id": "long_dated", "name": "Longer-dated", "summary": "45 to 90 days to expiry, for slower time decay",
+        {"id": "core", "name": "Core", "summary": "The current rules", "group": "both", "rules": {}},
+        {"id": "long_dated", "group": "rules", "name": "Longer-dated", "summary": "45 to 90 days to expiry, for slower time decay",
          "rules": {"sim_min_dte": 45, "sim_max_dte": 90}},
-        {"id": "wide_exits", "name": "Let winners run", "summary": "Exits at +100% or -50%",
+        {"id": "wide_exits", "group": "rules", "name": "Let winners run", "summary": "Exits at +100% or -50%",
          "rules": {"sim_target_pct": 100.0, "sim_stop_pct": 50.0}},
-        {"id": "quick_exits", "name": "Quick exits", "summary": "Exits at +30% or -25%",
+        {"id": "quick_exits", "group": "rules", "name": "Quick exits", "summary": "Exits at +30% or -25%",
          "rules": {"sim_target_pct": 30.0, "sim_stop_pct": 25.0}},
-        {"id": "high_conviction", "name": "High conviction", "summary": "Only buys at a score of 80 or more",
+        {"id": "high_conviction", "group": "rules", "name": "High conviction", "summary": "Only buys at a score of 80 or more",
          "rules": {"sim_min_score": 80}},
-        {"id": "otm", "name": "Out of the money", "summary": "Only contracts at least 2% out of the money",
+        {"id": "otm", "group": "rules", "name": "Out of the money", "summary": "Only contracts at least 2% out of the money",
          "rules": {"sim_min_moneyness": 0.02}},
-        {"id": "no_regime", "name": "No market filter", "summary": "Ignores market direction and regime limits",
+        {"id": "no_regime", "group": "rules", "name": "No market filter", "summary": "Ignores market direction and regime limits",
          "rules": {"sim_use_regime": False}},
-        {"id": "skip_weak_sectors", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
+        {"id": "skip_weak_sectors", "group": "rules", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
          "rules": {"sim_skip_avoided_sectors": True}},
+        {"id": "w_flows", "name": "Dealer-flow weighted", "group": "weights",
+         "summary": "Market read led by dealer gamma, vanna, charm and DEX (35%)",
+         "rules": {"method_weights": {"auction": 0.15, "gamma": 0.35, "wyckoff": 0.08, "vpa": 0.08, "avwap": 0.10,
+                                      "vol": 0.12, "sector": 0.05, "trend": 0.04, "seasonal": 0.03}}},
+        {"id": "w_structure", "name": "Price-structure weighted", "group": "weights",
+         "summary": "Market read led by auction, Wyckoff, VPA and AVWAPs",
+         "rules": {"method_weights": {"auction": 0.28, "gamma": 0.10, "wyckoff": 0.22, "vpa": 0.15, "avwap": 0.15,
+                                      "vol": 0.04, "sector": 0.03, "trend": 0.02, "seasonal": 0.01}}},
+        {"id": "w_momentum", "name": "Momentum and rotation weighted", "group": "weights",
+         "summary": "Market read led by trend, AVWAPs and sector rotation",
+         "rules": {"method_weights": {"auction": 0.12, "gamma": 0.08, "wyckoff": 0.08, "vpa": 0.08, "avwap": 0.18,
+                                      "vol": 0.04, "sector": 0.17, "trend": 0.20, "seasonal": 0.05}}},
+        {"id": "w_cheap_vol", "name": "Cheap-volatility weighted", "group": "weights",
+         "summary": "Contract score led by option price against volatility, time decay and breakeven",
+         "rules": {"factor_weights": {"trend": 20, "liquidity": 10, "breakeven": 15, "iv_value": 25, "gamma": 10,
+                                      "theta": 15, "target": 5}}},
+        {"id": "w_read_heavy", "name": "Market-read weighted", "group": "weights",
+         "summary": "Contract score led by the strength of the market read (45%); buys at 60+ since its scale runs lower",
+         "rules": {"factor_weights": {"trend": 45, "liquidity": 15, "breakeven": 10, "iv_value": 10, "gamma": 5,
+                                      "theta": 10, "target": 5}, "sim_min_score": 60}},
     ],
     "ntfy_topic": "",  # push notifications via ntfy.sh; empty = off
     "ntfy_server": "https://ntfy.sh",
