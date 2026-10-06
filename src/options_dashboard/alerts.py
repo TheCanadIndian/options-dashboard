@@ -9,7 +9,6 @@ from typing import Any
 import pandas as pd
 import requests
 
-from . import config
 from .config import STATE_DIR
 
 STATE_FILE = STATE_DIR / "alerts.json"
@@ -65,21 +64,26 @@ def _load_state() -> dict[str, str]:
         return {}
 
 
-def notify(contracts: pd.DataFrame, cfg: dict[str, Any]) -> tuple[int, list[str]]:
+def notify(result: dict[str, Any], cfg: dict[str, Any]) -> tuple[int, list[str]]:
     """Alert on fresh, live-quoted contracts above the score threshold.
 
     Returns (number sent, errors).
     """
+    from .portfolio import entry_block, market_regime  # local: portfolio imports the scanner stack
+
+    contracts = result["contracts"]
     if not enabled(cfg) or contracts.empty:
         return 0, []
+    regime = market_regime(result, cfg)
     now = datetime.now()
     cooldown = timedelta(hours=cfg["alert_cooldown_hours"])
     state = {
         k: v for k, v in _load_state().items() if now - datetime.fromisoformat(v) < cooldown
     }
 
-    picks = contracts[(contracts["score"] >= cfg["alert_min_score"]) & ~contracts["stale"]
-                      & (contracts["cost"] <= config.max_premium(cfg))]
+    picks = contracts[(contracts["score"] >= cfg["alert_min_score"]) & ~contracts["stale"]]
+    ok = [entry_block(r, result["tickers"][r["ticker"]], regime, cfg) is None for _, r in picks.iterrows()]
+    picks = picks[ok] if len(picks) else picks
     # One alert per ticker and direction per cooldown, for its best contract only.
     picks = picks.drop_duplicates("ticker")
     keys = picks["ticker"] + ":" + picks["type"]

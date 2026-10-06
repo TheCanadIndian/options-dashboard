@@ -56,6 +56,17 @@ DEFAULTS: dict[str, Any] = {
     # (spreads are widest in the first 15 minutes) and before the close
     "sim_review_times": ["09:45", "15:30"],
     "sim_max_positions": 5,
+    # Market regime: the average combined read of these tickers. Beyond +/- the threshold, trades
+    # against it need a read at least this strong on their own stock.
+    "sim_regime_tickers": ["SPY", "QQQ"],
+    "sim_regime_threshold": 15,
+    "sim_counter_trend_min": 50,
+    "sim_max_same_direction": 3,  # most positions betting the same way
+    "sim_review_min_days": 3,  # trading days before a review can close a new position (stops still apply)
+    "sim_max_entry_spread": 8.0,  # % bid/ask spread allowed when buying
+    "sim_first_buy_time": "10:30",  # New York time: no buys while opening spreads are wide
+    "sim_max_buys_per_scan": 1,
+    "sim_max_buys_per_day": 2,
     "sim_commission": 0.65,  # per contract, each way
     "sim_reentry_days": 2,  # wait this long before re-buying a ticker after selling it
     "site_push": True,  # commit and push docs/ to GitHub after each scan

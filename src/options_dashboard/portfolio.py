@@ -13,6 +13,7 @@ from datetime import date, datetime, time as clock, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 from . import config, data, learning
@@ -143,7 +144,6 @@ def _manage(state: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
                 _close(state, pos, "Time limit", now, cfg)
 
 
-REVIEW_MIN_AGE = timedelta(minutes=60)  # a position bought within the hour was just judged on this read
 
 
 def _review_label(slot: str) -> str:
@@ -176,14 +176,15 @@ def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[s
             label: str = "End-of-day review") -> None:
     """Check each open position against the current market read and sell the ones that no longer hold up.
 
-    Hold while the read still points the trade's way. If the read has gone neutral, keep a
-    winner but raise its stop to the entry price, and sell a loser. Sell if the read has reversed.
+    Hold while the read points the trade's way or has only drifted to neutral; sell only when it
+    has reversed. Positions younger than sim_review_min_days trading days are left to their stops,
+    since each early exit pays the bid/ask spread again.
     """
     for pos in list(state["positions"]):
         info = result["tickers"].get(pos["ticker"])
         if info is None:
             continue  # ticker failed to scan or left the watchlist; try again at the next review
-        if datetime.fromisoformat(now) - datetime.fromisoformat(pos["opened"]) < REVIEW_MIN_AGE:
+        if np.busday_count(pos["opened"][:10], now[:10]) < cfg["sim_review_min_days"]:
             continue
         want = "bullish" if pos["type"] == "call" else "bearish"
         read, bias = info["trend"], info["bias"]
@@ -200,14 +201,10 @@ def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[s
         sell = None
         if bias == want:
             verdict, note = "Hold", f"Still viable: {summary}."
-        elif bias == "neutral" and ret > 0:
-            pos["stop_price"] = max(pos["stop_price"], pos["entry_price"])
-            verdict = "Hold with tighter stop"
-            note = (f"The thesis has weakened: {summary}. The trade is up {ret:.0%}, so it stays open "
-                    f"with the stop raised to the ${pos['entry_price']:.2f} entry price.")
         elif bias == "neutral":
-            verdict, sell = "Sell", f"{label}: thesis gone"
-            note = f"No longer viable: {summary} and the trade is down {abs(ret):.0%}."
+            verdict = "Hold"
+            note = (f"The read has weakened: {summary}. It has not reversed, so the trade stays open "
+                    f"({ret:+.0%}) under its stop and target.")
         else:
             verdict, sell = "Sell", f"{label}: read reversed"
             note = f"No longer viable: {summary}, against the {pos['type']}."
@@ -223,24 +220,66 @@ def _review(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[s
             _close(state, pos, sell, now, cfg)
 
 
+def market_regime(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
+    """The broad market's direction: the average combined read of the regime tickers."""
+    reads = {t: result["tickers"][t]["trend"] for t in cfg["sim_regime_tickers"] if t in result["tickers"]}
+    if not reads:
+        return {"score": None, "label": "unknown", "reads": {}}
+    score = float(np.mean(list(reads.values())))
+    label = ("bullish" if score >= cfg["sim_regime_threshold"] else
+             "bearish" if score <= -cfg["sim_regime_threshold"] else "neutral")
+    return {"score": score, "label": label, "reads": reads}
+
+
+def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str, Any]) -> str | None:
+    """Why the account would not buy this contract on its own merits, or None if it could."""
+    if row["cost"] > config.max_premium(cfg):
+        return "over budget"
+    if not (row["spread_pct"] <= cfg["sim_max_entry_spread"]):  # also catches a missing spread
+        return "spread too wide"
+    against = ((regime["label"] == "bullish" and row["type"] == "put")
+               or (regime["label"] == "bearish" and row["type"] == "call"))
+    if against and abs(info["trend"]) < cfg["sim_counter_trend_min"]:
+        return "against the market"
+    return None
+
+
+def buys_today(state: dict[str, Any], today: str) -> int:
+    return sum(1 for e in state["log"] if e["action"] == "BUY" and e["time"][:10] == today)
+
+
 def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
     contracts = result["contracts"]
     if contracts.empty:
         return
+    ny = datetime.now(NEW_YORK)
+    if ny.time() < clock(*map(int, cfg["sim_first_buy_time"].split(":"))):
+        return  # opening spreads are wide
+    room_today = cfg["sim_max_buys_per_day"] - buys_today(state, now[:10])
+    allowed = min(cfg["sim_max_buys_per_scan"], room_today)
+    if allowed <= 0:
+        return
+    regime = market_regime(result, cfg)
+    state["regime"] = {**regime, "time": now}
     held = {p["ticker"] for p in state["positions"]}
     cutoff = (datetime.fromisoformat(now) - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
     picks = contracts[(contracts["score"] >= cfg["sim_min_score"]) & ~contracts["stale"]]
+    bought = 0
 
     for _, row in picks.iterrows():  # already sorted best first
-        if len(state["positions"]) >= cfg["sim_max_positions"]:
+        if len(state["positions"]) >= cfg["sim_max_positions"] or bought >= allowed:
             break
         ticker = row["ticker"]
         cost = float(row["ask"]) * 100 + cfg["sim_commission"]
-        if row["cost"] > config.max_premium(cfg):
-            continue  # the scanner shows every price; the account only buys within its per-trade limit
+        if entry_block(row, result["tickers"][ticker], regime, cfg):
+            continue
+        same_way = sum(1 for p in state["positions"] if p["type"] == row["type"])
+        if same_way >= cfg["sim_max_same_direction"]:
+            continue
         if ticker in held or ticker in resting or cost > state["cash"]:
             continue
+        bought += 1
         entry = float(row["ask"])
         info = result["tickers"][ticker]
         expiry = datetime.strptime(row["expiration"], "%Y-%m-%d")

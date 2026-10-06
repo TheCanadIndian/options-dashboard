@@ -338,10 +338,15 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
         f"{cfg['sim_max_positions']} positions, one per stock.",
         f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
         f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry.",
-        f"Twice a day ({' and '.join(cfg['sim_review_times'])} New York time, after the open and before the "
-        "close), every open position is re-checked against the "
-        "current read. It is held if the read still points its way. If the read has gone neutral, a winner is "
-        "kept with its stop raised to the entry price and a loser is sold. If the read has reversed, it is sold.",
+        f"Only trades with the broad market: the average read of {' and '.join(cfg['sim_regime_tickers'])}. When it "
+        f"is beyond ±{cfg['sim_regime_threshold']}, a trade against it needs a read of at least "
+        f"±{cfg['sim_counter_trend_min']} on its own stock. At most {cfg['sim_max_same_direction']} positions bet the same way.",
+        f"Buys only after {cfg['sim_first_buy_time']} New York time, when spreads have settled, only when the "
+        f"bid/ask spread is {cfg['sim_max_entry_spread']:g}% or less, and at most {cfg['sim_max_buys_per_scan']} per "
+        f"scan and {cfg['sim_max_buys_per_day']} per day.",
+        f"Twice a day ({' and '.join(cfg['sim_review_times'])} New York time) every position at least "
+        f"{cfg['sim_review_min_days']} trading days old is re-checked against the current read. It is sold only if "
+        "the read has reversed against it; a read that has merely gone neutral leaves it to its stop and target.",
         f"Buys fill at the ask and sells at the bid, with {_money(cfg['sim_commission'])} commission each way.",
         "Prices come from Yahoo Finance, delayed about 15 minutes, and are checked every 15 minutes while the "
         "market is open. A real stop order could fill at a different price.",
@@ -380,7 +385,8 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 </main><script>{script}</script></body></html>"""
 
 
-def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: set[str]) -> tuple[str, bool]:
+def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: set[str],
+                info: dict[str, Any], regime: dict[str, Any]) -> tuple[str, bool]:
     """Why a flagged contract is or is not in the portfolio, and whether it is buy grade."""
     held = {p["symbol"] for p in state["positions"]}
     held_tickers = {p["ticker"] for p in state["positions"]}
@@ -397,8 +403,11 @@ def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: s
         return "Buy grade · cooling off", True
     if len(state["positions"]) >= cfg["sim_max_positions"]:
         return "Buy grade · slots full", True
-    if row["cost"] > cfg["account_size"] * cfg["risk_per_trade_pct"] / 100:
-        return "Buy grade · over budget", True
+    blocked = portfolio.entry_block(row, info, regime, cfg)
+    if blocked:
+        return f"Buy grade · {blocked}", True
+    if sum(1 for p in state["positions"] if p["type"] == row["type"]) >= cfg["sim_max_same_direction"]:
+        return f"Buy grade · enough {row['type']}s held", True
     if row["ask"] * 100 + cfg["sim_commission"] > state["cash"]:
         return "Buy grade · no cash", True
     return "Buy grade", True
@@ -442,12 +451,13 @@ def _surface_table(surf: dict[str, Any] | None) -> str:
 
 def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
     contracts, tickers = result["contracts"], result["tickers"]
+    regime = portfolio.market_regime(result, cfg)
     cutoff = (datetime.now() - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
 
     rows, buy_grade = [], 0
     for _, r in contracts.iterrows():
-        status, grade = _buy_status(r, state, cfg, resting)
+        status, grade = _buy_status(r, state, cfg, resting, tickers[r["ticker"]], regime)
         buy_grade += grade
         spread = "n/a" if r["spread_pct"] != r["spread_pct"] else f"{r['spread_pct']:.1f}%"
         ratio = "n/a" if r["iv_hv"] != r["iv_hv"] else f"{r['iv_hv']:.2f}"

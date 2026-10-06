@@ -226,7 +226,7 @@ def build(cfg: dict[str, Any], force: bool = False) -> dict[str, Any]:
 
 def tickers(cfg: dict[str, Any]) -> list[str]:
     """Watchlist first, then the liquid universe when it is enabled."""
-    names = list(cfg["watchlist"])
+    names = list(dict.fromkeys([*cfg["sim_regime_tickers"], *cfg["watchlist"]]))  # regime tickers always scanned
     if cfg["use_universe"]:
         try:
             universe = build(cfg)

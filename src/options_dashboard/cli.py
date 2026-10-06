@@ -46,7 +46,7 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
             if error:
                 print(f"  ! site not published: {error}")
     if send_alerts:
-        sent, errors = alerts.notify(result["contracts"], cfg)
+        sent, errors = alerts.notify(result, cfg)
         if alerts.enabled(cfg):
             print(f"Alerts sent: {sent}")
         for err in errors:
