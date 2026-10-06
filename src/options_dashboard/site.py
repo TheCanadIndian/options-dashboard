@@ -61,7 +61,7 @@ border:2px solid var(--surface)}
 .review{margin:12px 0 0;padding:8px 10px;border-left:3px solid var(--series);background:var(--page);
 border-radius:4px;font-size:13px;color:var(--ink2)}.review b{color:var(--ink)}
 details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
-summary{cursor:pointer;font-weight:600}
+summary{cursor:pointer;font-weight:600;padding:10px 0;min-height:24px}
 details h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
 details ul{margin:0;padding-left:18px}details li{margin:3px 0}
 ul.plain{list-style:none;padding:0}
@@ -75,20 +75,27 @@ th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;wh
 .scroll{overflow-x:auto}
 nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 main>*{min-width:0}
-nav a{padding:5px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
+nav a{padding:8px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
 nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
 td a{color:inherit}
 .sortable th{cursor:pointer;white-space:nowrap;user-select:none}
 .sortable th[data-dir=asc]::after{content:" ▲"}.sortable th[data-dir=desc]::after{content:" ▼"}
 .sortable td{white-space:nowrap}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
-.filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
+.filters input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin:0 6px 0 0}
+.filters label{display:inline-flex;align-items:center;min-height:36px}
+.filters select{font:inherit;padding:6px 8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
 .card:target{outline:2px solid var(--series)}
 .dbar{position:relative;height:8px;background:var(--track);border-radius:4px}
 .dbar span{position:absolute;top:0;height:8px;border-radius:4px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:14px;background:var(--axis)}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
 .linechart{position:relative}.linechart svg{display:block;width:100%;height:auto}
+.mob{display:none}
+@media (max-width:640px){
+.desk{display:none}.mob{display:block}.lb-sum{display:none}
+.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.tile .v{font-size:20px}
+main{padding:16px 12px 40px}h1{font-size:21px}}
 .tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
 footer{margin-top:40px;color:var(--muted);font-size:12px}
@@ -119,10 +126,10 @@ CHART_JS = """
 document.querySelectorAll('.linechart').forEach(function(el){var d=JSON.parse(el.dataset.points),
 svg=el.querySelector('svg'),line=svg.querySelector('.xh'),dot=svg.querySelector('.xd'),tip=el.querySelector('.tip');
 function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,
-vx=cx/r.width*800,best=0,gap=1e9;for(var i=0;i<d.length;i++){var g=Math.abs(d[i][0]-vx);if(g<gap){gap=g;best=i}}
+vw=svg.viewBox.baseVal.width,vx=cx/r.width*vw,best=0,gap=1e9;for(var i=0;i<d.length;i++){var g=Math.abs(d[i][0]-vx);if(g<gap){gap=g;best=i}}
 var p=d[best];line.setAttribute('x1',p[0]);line.setAttribute('x2',p[0]);dot.setAttribute('cx',p[0]);
 dot.setAttribute('cy',p[1]);line.style.display=dot.style.display='';tip.style.display='block';
-tip.innerHTML='<b>'+p[3]+'</b><br>'+p[2];var x=p[0]/800*r.width;
+tip.innerHTML='<b>'+p[3]+'</b><br>'+p[2];var x=p[0]/vw*r.width;
 tip.style.left=Math.min(Math.max(x-tip.offsetWidth/2,0),r.width-tip.offsetWidth)+'px';
 tip.style.top=Math.max(p[1]/260*r.height-tip.offsetHeight-12,0)+'px'}
 function out(){line.style.display=dot.style.display='none';tip.style.display='none'}
@@ -158,10 +165,20 @@ def _day(iso: str) -> str:
     return f"{t:%b} {t.day}"
 
 
+def _both(desktop: str, phone: str) -> str:
+    """Two drawings of the same chart; CSS shows the phone one on narrow screens."""
+    return f'<div class="desk">{desktop}</div><div class="mob">{phone}</div>'
+
+
+def _thin(ticks: list, most: int) -> list:
+    return ticks[::max(1, -(-len(ticks) // most))]
+
+
 def _line_chart(values: list[float], hover_labels: list[str], hover_values: list[str], ticks: list[tuple[int, str]],
-                axis_format, baseline: float, baseline_label: str, aria: str, pad_floor: float) -> str:
+                axis_format, baseline: float, baseline_label: str, aria: str, pad_floor: float,
+                width: int = 800) -> str:
     """One-series line chart with a dashed reference line and a hover crosshair (see CHART_JS)."""
-    W, H, L, R, T, B = 800, 260, 56, 12, 12, 28
+    W, H, L, R, T, B = width, 260, 56, 12, 12, 28
     lo, hi = min(values + [baseline]), max(values + [baseline])
     pad = max((hi - lo) * 0.15, pad_floor)
     lo, hi = lo - pad, hi + pad
@@ -184,7 +201,7 @@ def _line_chart(values: list[float], hover_labels: list[str], hover_values: list
     base = y(baseline)
     return (
         f'<div class="linechart" data-points="{escape(json.dumps(data))}">'
-        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(aria)}" font-size="11" fill="var(--muted)">'
+        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(aria)}" font-size="13" fill="var(--muted)">'
         f'{grid}{tick_html}'
         f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>'
         f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">{escape(baseline_label)}</text>'
@@ -204,11 +221,14 @@ def _chart(points: list[list], start_cash: float) -> str:
         if t[:10] not in seen:
             seen.add(t[:10])
             ticks.append((i, _day(t)))
-    ticks = ticks[::max(1, len(ticks) // 8)]
     values = [v for _, v in points]
-    return _line_chart(values, [_when(t) for t, _ in points], [_money(v) for v in values], ticks,
-                       lambda v: _money(v, False), start_cash, f"Starting {_money(start_cash, False)}",
-                       "Account value over time", start_cash * 0.005)
+
+    def draw(width: int, most: int) -> str:
+        return _line_chart(values, [_when(t) for t, _ in points], [_money(v) for v in values], _thin(ticks, most),
+                           lambda v: _money(v, False), start_cash, f"Starting {_money(start_cash, False)}",
+                           "Account value over time", start_cash * 0.005, width)
+
+    return _both(draw(800, 8), draw(420, 4))
 
 
 def _lines(reasons: list[str]) -> str:
@@ -375,7 +395,7 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
 <h2>How the simulation trades</h2><div class="panel"><ul>{"".join(f"<li>{escape(r)}</li>" for r in rules)}</ul></div>"""
     sub = (f"Simulated trades from the options scanner. Started {_when(state['started'])} ET · "
            f"last updated {_when(state['updated'])} ET")
-    return _page("Portfolio", sub, body, CHART_JS)
+    return _page("Portfolio", sub, body, CHART_JS + TABLE_JS)
 
 
 def _page(active: str, sub: str, body: str, script: str) -> str:
@@ -476,7 +496,22 @@ def _rotation_graph(rot: dict[str, Any]) -> str:
     tails = {name: r["tail"] for name, r in rot.items() if r.get("tail")}
     if not tails:
         return ""
-    W, H, L, R, T, B = 760, 560, 64, 24, 24, 56
+    legend = "".join(
+        f'<span><i style="background:var({QUADRANTS[q][0]})"></i>{q.capitalize()}</span>'
+        for q in ("leading", "weakening", "lagging", "improving"))
+    return (
+        f'<div class="panel"><div class="legend">{legend}</div>'
+        f'{_both(_rotation_svg(rot, tails, (760, 560, 64, 24, 24, 56), "d"), _rotation_svg(rot, tails, (420, 440, 44, 12, 18, 44), "m"))}'
+        f'<p class="muted small">Each line is a sector&#39;s last {len(next(iter(tails.values()))) - 1} weeks; the large '
+        'dot is now, labelled with its ETF. Sectors rotate clockwise: leading, then weakening, lagging and improving, '
+        'then back to leading. Hover over (or tap) a dot for its values.</p></div>'
+    )
+
+
+def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, prefix: str) -> str:
+    """One drawing of the rotation graph at the given (width, height, left, right, top, bottom)."""
+    W, H, L, R, T, B = size
+    narrow = W < 600
     xs = [p["ratio"] for t in tails.values() for p in t]
     ys = [p["momentum"] for t in tails.values() for p in t]
     xspan = max(max(abs(v - 100) for v in xs) * 1.15, 1.0)
@@ -508,13 +543,14 @@ def _rotation_graph(rot: dict[str, Any]) -> str:
                      f'<text x="{L - 8}" y="{gy + 4:.1f}" text-anchor="end">{100 + yspan * k / 2.5:.1f}</text>')
     parts.append(f'<line x1="{cx:.1f}" x2="{cx:.1f}" y1="{T}" y2="{H - B}" stroke="var(--axis)" stroke-width="1.5"/>'
                  f'<line x1="{L}" x2="{W - R}" y1="{cy:.1f}" y2="{cy:.1f}" stroke="var(--axis)" stroke-width="1.5"/>')
-    parts.append(f'<text x="{(L + W - R) / 2:.1f}" y="{H - 14}" text-anchor="middle" fill="var(--ink2)">'
-                 'RS ratio: strength against SPY (above 100 is stronger)</text>'
-                 f'<text transform="translate(16 {(T + H - B) / 2:.1f}) rotate(-90)" text-anchor="middle" fill="var(--ink2)">'
-                 'RS momentum (above 100 is rising)</text>')
+    x_title = "RS ratio (above 100 is stronger)" if narrow else "RS ratio: strength against SPY (above 100 is stronger)"
+    y_title = "RS momentum" if narrow else "RS momentum (above 100 is rising)"
+    parts.append(f'<text x="{(L + W - R) / 2:.1f}" y="{H - 10}" text-anchor="middle" fill="var(--ink2)">{x_title}</text>'
+                 f'<text transform="translate(12 {(T + H - B) / 2:.1f}) rotate(-90)" text-anchor="middle" '
+                 f'fill="var(--ink2)">{y_title}</text>')
 
     markers = "".join(
-        f'<marker id="arrow-{q}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
+        f'<marker id="arrow-{prefix}-{q}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
         f'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var({token})"/></marker>'
         for q, (token, _) in QUADRANTS.items())
     parts.insert(0, f"<defs>{markers}</defs>")
@@ -531,7 +567,7 @@ def _rotation_graph(rot: dict[str, Any]) -> str:
                 length = max(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5, 1e-6)
                 if length > 12:
                     x2, y2 = x2 - (x2 - x1) / length * 9, y2 - (y2 - y1) / length * 9
-                    arrow = f' marker-end="url(#arrow-{r["quadrant"]})"'
+                    arrow = f' marker-end="url(#arrow-{prefix}-{r["quadrant"]})"'
             parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="var({token})" '
                          f'stroke-width="2" stroke-linecap="round" opacity="{0.25 + 0.55 * (i + 1) / n:.2f}"{arrow}/>')
         for i, p in enumerate(tail):
@@ -564,17 +600,8 @@ def _rotation_graph(rot: dict[str, Any]) -> str:
         parts.append(f'<text x="{hx + dx:.1f}" y="{hy + dy:.1f}" text-anchor="{anchor}" font-size="12" font-weight="600" '
                      f'fill="var(--ink)" stroke="var(--surface)" stroke-width="3" paint-order="stroke">{escape(etf)}</text>')
 
-    legend = "".join(
-        f'<span><i style="background:var({QUADRANTS[q][0]})"></i>{q.capitalize()}</span>'
-        for q in ("leading", "weakening", "lagging", "improving"))
-    return (
-        f'<div class="panel"><div class="legend">{legend}</div>'
-        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the eleven sector ETFs" '
-        f'font-size="11" fill="var(--muted)" style="width:100%;height:auto;display:block">{"".join(parts)}</svg>'
-        f'<p class="muted small">Each line is a sector&#39;s last {len(next(iter(tails.values()))) - 1} weeks; the large '
-        'dot is now, labelled with its ETF. Sectors rotate clockwise: leading, then weakening, lagging and improving, '
-        'then back to leading. Hover over a dot for its values.</p></div>'
-    )
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the eleven sector ETFs" '
+            f'font-size="11" fill="var(--muted)" style="width:100%;height:auto;display:block">{"".join(parts)}</svg>')
 
 
 def _rotation_table(rot: dict[str, Any]) -> str:
@@ -1005,9 +1032,12 @@ def _regime_section(model: dict[str, Any] | None, limits: tuple[int, int, str | 
             if d[:7] not in seen:
                 seen.add(d[:7])
                 months.append((i, datetime.fromisoformat(d).strftime("%b")))
-        chart = _line_chart([v for _, v in path], [_day(d) for d, _ in path], [f"{v:+.0f}" for _, v in path],
-                            months[::max(1, len(months) // 12)], lambda v: f"{v:+.0f}", 0.0, "Neutral",
-                            "Risk score over the past year", 5.0)
+        def draw(width: int, most: int) -> str:
+            return _line_chart([v for _, v in path], [_day(d) for d, _ in path], [f"{v:+.0f}" for _, v in path],
+                               _thin(months, most), lambda v: f"{v:+.0f}", 0.0, "Neutral",
+                               "Risk score over the past year", 5.0, width)
+
+        chart = _both(draw(800, 12), draw(420, 6))
 
     rows = []
     for key, value in model["components"].items():
@@ -1116,9 +1146,9 @@ MULTI_JS = """
 document.querySelectorAll('.multichart').forEach(function(el){var d=JSON.parse(el.dataset.chart),
 svg=el.querySelector('svg'),line=svg.querySelector('.xh'),tip=el.querySelector('.tip');
 function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left,
-vx=cx/r.width*800,best=0,gap=1e9;for(var i=0;i<d.x.length;i++){var g=Math.abs(d.x[i]-vx);if(g<gap){gap=g;best=i}}
+vx=cx/r.width*d.w,best=0,gap=1e9;for(var i=0;i<d.x.length;i++){var g=Math.abs(d.x[i]-vx);if(g<gap){gap=g;best=i}}
 line.setAttribute('x1',d.x[best]);line.setAttribute('x2',d.x[best]);line.style.display='';
-tip.innerHTML='<b>'+d.labels[best]+'</b>'+d.rows[best];tip.style.display='block';var x=d.x[best]/800*r.width;
+tip.innerHTML='<b>'+d.labels[best]+'</b>'+d.rows[best];tip.style.display='block';var x=d.x[best]/d.w*r.width;
 tip.style.left=Math.min(Math.max(x+12,0),r.width-tip.offsetWidth)+'px';tip.style.top='8px'}
 function out(){line.style.display='none';tip.style.display='none'}
 svg.addEventListener('mousemove',move);svg.addEventListener('touchstart',move,{passive:true});
@@ -1127,12 +1157,12 @@ svg.addEventListener('touchmove',move,{passive:true});svg.addEventListener('mous
 SERIES_TOKENS = [f"--s{i}" for i in range(1, 9)]
 
 
-def _multi_chart(series: list[tuple[str, list[list]]], start_cash: float) -> str:
+def _multi_chart(series: list[tuple[str, list[list]]], start_cash: float, width: int = 800) -> str:
     """Every account's value over time on one axis, coloured in a fixed order, with a legend."""
     times = sorted({t for _, pts in series for t, _ in pts})
     if len(times) < 2:
         return '<p class="muted">The chart appears after the second scan.</p>'
-    W, H, L, R, T, B = 800, 300, 60, 12, 12, 28
+    W, H, L, R, T, B = width, 300, 60, 12, 12, 28
     values = [v for _, pts in series for _, v in pts] + [start_cash]
     lo, hi = min(values), max(values)
     pad = max((hi - lo) * 0.12, start_cash * 0.005)
@@ -1155,7 +1185,7 @@ def _multi_chart(series: list[tuple[str, list[list]]], start_cash: float) -> str
         if t[:10] not in seen:
             seen.add(t[:10])
             ticks.append((index[t], _day(t)))
-    for n, (i, text) in enumerate(ticks[::max(1, len(ticks) // 8)]):
+    for n, (i, text) in enumerate(_thin(ticks, 8 if width > 600 else 4)):
         parts.append(f'<text x="{x(i):.1f}" y="{H - 8}" text-anchor="{"start" if n == 0 else "middle"}">{text}</text>')
     base = y(start_cash)
     parts.append(f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>')
@@ -1173,12 +1203,13 @@ def _multi_chart(series: list[tuple[str, list[list]]], start_cash: float) -> str
         rows.append("".join(f'<br><i style="display:inline-block;width:8px;height:8px;border-radius:2px;'
                             f'background:var({SERIES_TOKENS[n % 8]});margin-right:5px"></i>{escape(name)} {_money(v)}'
                             for v, name, n in here))
-    chart = {"x": [round(x(i), 1) for i in range(len(times))], "labels": [_when(t) for t in times], "rows": rows}
+    chart = {"w": W, "x": [round(x(i), 1) for i in range(len(times))], "labels": [_when(t) for t in times], "rows": rows}
     legend = "".join(f'<span><i style="background:var({SERIES_TOKENS[n % 8]})"></i>{escape(name)}</span>'
                      for n, (name, _) in enumerate(series))
-    return (f'<div class="legend">{legend}</div><div class="multichart linechart" data-chart="{escape(json.dumps(chart))}">'
-            f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Each account&#39;s value over time" font-size="11" '
-            f'fill="var(--muted)">{"".join(parts)}</svg><div class="tip"></div></div>')
+    return (f'<div class="legend">{legend}</div><div class="multichart linechart" '
+            f'data-chart="{escape(json.dumps(chart))}"><svg viewBox="0 0 {W} {H}" role="img" '
+            f'aria-label="Each account&#39;s value over time" font-size="13" fill="var(--muted)">{"".join(parts)}</svg>'
+            f'<div class="tip"></div></div>')
 
 
 def _account_stats(state: dict[str, Any]) -> dict[str, Any]:
@@ -1204,21 +1235,25 @@ def render_strategies(cfg: dict[str, Any]) -> str:
 
     rows = "".join(
         "<tr>" + _cell(n, str(n)) + _cell(a["name"], f'<a href="#acct-{a["id"]}"><b>{escape(a["name"])}</b></a>'
-                                       f'<br><span class="muted small">{escape(a["summary"])}</span>', False)
-        + _cell(st["value"], _money(st["value"])) + _cell(st["return"], _delta(st["value"] - states[a["id"]]["start_cash"], st["return"]))
+                                       f'<br><span class="muted small lb-sum">{escape(a["summary"])}</span>', False)
+        + _cell(st["return"], f'<span class="{"up" if st["return"] >= 0 else "down"}">{"▲" if st["return"] >= 0 else "▼"} '
+                              f'{st["return"]:+.1%}</span>')
+        + _cell(st["value"], _money(st["value"]))
         + _cell(st["realised"], _signed(st["realised"]) if st["closed"] else "–")
         + _cell(st["closed"], f'{st["wins"]}–{st["closed"] - st["wins"]}' if st["closed"] else "0")
         + _cell(st["win_rate"] or -1, _pct(st["win_rate"], 0)) + _cell(st["avg"] or 0, _signed(st["avg"]) if st["avg"] is not None else "–")
         + _cell(st["open"], str(st["open"])) + _cell(st["drop"], f'{st["drop"]:.1%}')
         + _cell(st["started"], _day(st["started"])) + "</tr>"
         for n, (a, st) in enumerate(((a, stats[a["id"]]) for a in ranked), 1))
-    table = ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Rank</th><th>Strategy</th><th>Value</th>'
-             '<th>Return</th><th>Realised P/L</th><th>Won–lost</th><th>Win rate</th><th>Average closed trade</th>'
+    table = ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Rank</th><th>Strategy</th><th>Return</th>'
+             '<th>Value</th><th>Realised P/L</th><th>Won–lost</th><th>Win rate</th><th>Average closed trade</th>'
              f'<th>Open</th><th>Largest drop</th><th>Started</th></tr></thead><tbody>{rows}</tbody></table></div>')
 
     def group_chart(group: str) -> str:
         members = [a for a in accounts if a.get("group") in (group, "both")]
-        return _multi_chart([(a["name"], states[a["id"]]["equity"]) for a in members], float(cfg["account_size"]))
+        series = [(a["name"], states[a["id"]]["equity"]) for a in members]
+        return _both(_multi_chart(series, float(cfg["account_size"]), 800),
+                     _multi_chart(series, float(cfg["account_size"]), 420))
 
     chart = (f'<h4 style="margin:0 0 8px">Rule changes</h4>{group_chart("rules")}'
              f'<h4 style="margin:24px 0 8px">Scoring weights</h4>{group_chart("weights")}')
