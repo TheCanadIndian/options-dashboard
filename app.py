@@ -228,6 +228,8 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
         ("Point of control", levels.get("poc")), ("Value area low", levels.get("val")),
         ("Gamma flip", levels.get("flip")), ("Put wall", levels.get("put_wall")),
         ("Range high", levels.get("range_high")), ("Range low", levels.get("range_low")),
+        ("AVWAP, this quarter", levels.get("avwap_quarter")), ("AVWAP, last quarter", levels.get("avwap_prev_quarter")),
+        ("AVWAP, latest vol event", levels.get("avwap_event")), ("AVWAP, largest vol event", levels.get("avwap_major")),
         ("Last price", info["spot"]),
     ]
     table = pd.DataFrame([(n, v) for n, v in named if v is not None], columns=["Level", "Price"])
@@ -358,8 +360,8 @@ def main() -> None:
             detail(pick["ticker"], tickers[pick["ticker"]], pick)
 
     with trends_tab:
-        short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "vol": "Vol",
-                 "trend": "Trend"}
+        short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "avwap": "AVWAP",
+                 "vol": "Vol", "sector": "Sector", "trend": "Trend", "seasonal": "Seasonal"}
         trend_df = pd.DataFrame([
             {"Ticker": t, "Price": r["spot"], "Read": r["trend"], "Bias": r["bias"].capitalize(),
              **{short[m["key"]]: m["score"] for m in r["methods"]},

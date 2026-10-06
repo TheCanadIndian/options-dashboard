@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from . import config, data, earnings, flow, greeks, learning, structure, ta, universe, vol
+from . import avwap, config, data, earnings, flow, greeks, learning, seasonal, sectors, structure, ta, universe, vol
 
 WEIGHTS = {
     "trend": 30,  # strength of the composite market read in the contract's direction
@@ -26,6 +26,8 @@ TARGET_LEVELS = {
     "vah": "value area high", "val": "value area low", "poc": "point of control",
     "call_wall": "call wall", "put_wall": "put wall", "flip": "gamma flip",
     "range_high": "Wyckoff range high", "range_low": "Wyckoff range low",
+    "avwap_quarter": "quarter's anchored VWAP", "avwap_prev_quarter": "last quarter's anchored VWAP",
+    "avwap_event": "volatility-event anchored VWAP", "avwap_major": "major-event anchored VWAP",
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
@@ -94,7 +96,7 @@ def _iv_value(df: pd.DataFrame, surf: dict | None, levels: dict[str, Any]) -> np
 
 def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, snap: dict, spot: float,
                     rate: float, chain: pd.DataFrame | None, quote: dict[str, Any], surf: dict | None,
-                    report: date | None) -> dict:
+                    report: date | None, context: dict[str, Any] | None = None) -> dict:
     """Run every method; one that lacks data or fails returns None and is left out."""
     def attempt(read):
         try:
@@ -126,11 +128,17 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
         "wyckoff": attempt(lambda: structure.wyckoff(ind)),
         "vpa": attempt(lambda: structure.vpa(ind)),
         "vol": attempt(lambda: volatility_read(ticker, surf, quote, report)) if surf else None,
+        "avwap": attempt(lambda: avwap.read(ind, spot)),
+        "sector": attempt(lambda: sectors.read(ticker, (context or {}).get("sectors", {}).get(ticker),
+                                               (context or {}).get("rotation", {}), ind)),
+        "seasonal": attempt(lambda: seasonal.read(seasonal.stats(ticker))),
         "trend": {"score": snap["trend"], "reasons": snap["reasons"]},
     }
 
 
-def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]:
+def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Everything about one ticker. `context` carries market-wide data shared by every ticker
+    (sector rotation and the stock-to-sector map); without it the sector read is skipped."""
     daily = data.history(ticker)
     try:
         bars = data.intraday(ticker)
@@ -166,7 +174,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float) -> dict[str, Any]
         surf = vol.surface(chain, spot, rate, SURFACE_MAX_DTE) if chain is not None and not chain.empty else None
     except Exception:
         surf = None
-    reads = _read_structure(ticker, ind, bars, snap, spot, rate, chain, quote, surf, report)
+    reads = _read_structure(ticker, ind, bars, snap, spot, rate, chain, quote, surf, report, context)
     score = structure.composite(reads)
     direction = ta.bias(score, cfg["min_trend_strength"])
     levels = {k: v for p in reads.values() if p for k, v in p.items() if k not in ("score", "reasons")}
@@ -292,10 +300,11 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
     """Scan the whole watchlist. Returns ranked contracts, per-ticker detail and errors."""
     rate = data.risk_free_rate(cfg["fallback_risk_free_rate"])
     tickers, errors = {}, {}
+    context = {"rotation": sectors.rotation(), "sectors": sectors.sector_of()}
 
     def work(ticker: str):
         try:
-            return ticker, scan_ticker(ticker, cfg, rate), None
+            return ticker, scan_ticker(ticker, cfg, rate, context), None
         except Exception as exc:  # one bad ticker must not sink the scan
             return ticker, None, f"{type(exc).__name__}: {exc}"
 
@@ -317,6 +326,7 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
         "tickers": tickers,
         "errors": errors,
         "rate": rate,
+        "rotation": context["rotation"],
         "scanned_at": datetime.now(),
     }
 

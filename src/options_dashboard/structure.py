@@ -23,10 +23,13 @@ from . import greeks, learning
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Share of the composite direction score each method contributes.
-METHOD_WEIGHTS = {"auction": 0.25, "gamma": 0.20, "wyckoff": 0.15, "vpa": 0.15, "vol": 0.10, "trend": 0.15}
+METHOD_WEIGHTS = {"auction": 0.20, "gamma": 0.17, "wyckoff": 0.12, "vpa": 0.12, "avwap": 0.10, "vol": 0.08,
+                  "sector": 0.08, "trend": 0.08, "seasonal": 0.05}
 METHOD_NAMES = {
     "auction": "Auction / market profile", "gamma": "Dealer gamma, vanna, charm and customer DEX", "wyckoff": "Wyckoff",
-    "vpa": "Volume price analysis", "vol": "Volatility skew and surface", "trend": "Trend and momentum",
+    "vpa": "Volume price analysis", "avwap": "Anchored VWAPs (quarters and volatility events)",
+    "vol": "Volatility skew and surface", "sector": "Sector rotation", "trend": "Trend and momentum",
+    "seasonal": "Seasonality",
 }
 
 

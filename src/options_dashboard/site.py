@@ -85,7 +85,8 @@ footer{margin-top:40px;color:var(--muted);font-size:12px}
 """
 
 METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA",
-                "vol": "Vol surface", "trend": "Trend"}
+                "avwap": "AVWAPs", "vol": "Vol surface", "sector": "Sector", "trend": "Trend",
+                "seasonal": "Seasonal"}
 
 TABLE_JS = """
 document.querySelectorAll('table.sortable').forEach(function(table){
@@ -449,6 +450,28 @@ def _surface_table(surf: dict[str, Any] | None) -> str:
     )
 
 
+def _rotation_table(rot: dict[str, Any]) -> str:
+    """Sectors ranked by one-month strength against SPY, with their rotation quadrant."""
+    if not rot:
+        return '<p class="muted">Sector data unavailable on this scan.</p>'
+    marks = {"leading": "▲ Leading", "improving": "↗ Improving", "weakening": "↘ Weakening", "lagging": "▼ Lagging"}
+    def pct(value: float) -> str:
+        return _cell(value, f"{value:+.1%}")
+
+    rows = "".join(
+        f'<tr>{_cell(r["rank"], str(r["rank"]))}{_cell(name, escape(name), False)}{_cell(r["etf"], r["etf"], False)}'
+        f'{_cell(r["quadrant"], marks[r["quadrant"]], False)}{pct(r["rs_1m"])}{pct(r["rs_3m"])}'
+        f'{pct(r["momentum"])}{pct(r["return_1m"])}</tr>'
+        for name, r in sorted(rot.items(), key=lambda kv: kv[1]["rank"])
+    )
+    return ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Rank</th><th>Sector</th><th>ETF</th>'
+            '<th>Quadrant</th><th>vs SPY, 1 month</th><th>vs SPY, 3 months</th><th>Momentum</th><th>Return, 1 month</th>'
+            f'</tr></thead><tbody>{rows}</tbody></table></div>'
+            '<p class="muted small">Leading: stronger than SPY and gaining. Improving: weaker but gaining. Weakening: '
+            'stronger but losing ground. Lagging: weaker and losing ground. Momentum is this month&#39;s change in '
+            'strength against last month&#39;s.</p>')
+
+
 def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
     contracts, tickers = result["contracts"], result["tickers"]
     regime = portfolio.market_regime(result, cfg)
@@ -548,6 +571,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 <tbody>{"".join(read_rows)}</tbody></table></div>
 <p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
 at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
+<h2>Sector rotation</h2>{_rotation_table(result.get("rotation") or {})}
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
     built = universe.load()
     origin = (f" Universe from {escape(built['source'])}, built {_when(built['built'])} ET."
