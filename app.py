@@ -199,6 +199,58 @@ def surface_chart(surf: dict) -> go.Figure:
     return fig
 
 
+QUADRANT_COLOURS = {"leading": "#199e70", "weakening": "#c98500", "lagging": "#e66767", "improving": "#3987e5"}
+
+
+def rotation_chart(rot: dict) -> go.Figure:
+    """Relative rotation graph: RS ratio across, RS momentum up, an 8-week tail per sector."""
+    xs = [p["ratio"] for r in rot.values() for p in r["tail"]]
+    ys = [p["momentum"] for r in rot.values() for p in r["tail"]]
+    xspan = max(max(abs(v - 100) for v in xs) * 1.15, 1.0)
+    yspan = max(max(abs(v - 100) for v in ys) * 1.15, 1.0)
+    x0, x1, y0, y1 = 100 - xspan, 100 + xspan, 100 - yspan, 100 + yspan
+    fig = go.Figure()
+    corners = {"leading": (100, x1, 100, y1), "weakening": (100, x1, y0, 100),
+               "lagging": (x0, 100, y0, 100), "improving": (x0, 100, 100, y1)}
+    for name, (ax0, ax1, ay0, ay1) in corners.items():
+        fig.add_shape(type="rect", x0=ax0, x1=ax1, y0=ay0, y1=ay1, fillcolor=QUADRANT_COLOURS[name],
+                      opacity=0.07, line_width=0, layer="below")
+        fig.add_annotation(x=ax1 if ax0 == 100 else ax0, y=ay1 if ay0 == 100 else ay0, text=f"<b>{name.capitalize()}</b>",
+                           showarrow=False, xanchor="right" if ax0 == 100 else "left",
+                           yanchor="top" if ay0 == 100 else "bottom", font=dict(color="#c3c2b7", size=13))
+    fig.add_hline(y=100, line=dict(color=AXIS, width=1.5))
+    fig.add_vline(x=100, line=dict(color=AXIS, width=1.5))
+    for quadrant, colour in QUADRANT_COLOURS.items():  # legend entries only
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=quadrant.capitalize(),
+                                 marker=dict(color=colour, size=10, symbol="square")))
+    for name, r in sorted(rot.items(), key=lambda kv: kv[1]["rank"], reverse=True):
+        tail, colour = r["tail"], QUADRANT_COLOURS[r["quadrant"]]
+        n = len(tail) - 1
+        fig.add_trace(go.Scatter(
+            x=[p["ratio"] for p in tail], y=[p["momentum"] for p in tail], mode="lines+markers", showlegend=False,
+            line=dict(color=colour, width=2), opacity=0.85,
+            marker=dict(color=colour, size=[5] * n + [14], opacity=[0.3 + 0.5 * i / max(n, 1) for i in range(n)] + [1],
+                        line=dict(color=SURFACE, width=2)),
+            customdata=[p["week"] for p in tail], name=f"{r['etf']} {name}",
+            hovertemplate="%{fullData.name}<br>week of %{customdata}<br>RS ratio %{x:.2f}<br>RS momentum %{y:.2f}<extra></extra>"))
+        if n >= 1:  # arrow along the latest week's move
+            fig.add_annotation(x=tail[-1]["ratio"], y=tail[-1]["momentum"], ax=tail[-2]["ratio"], ay=tail[-2]["momentum"],
+                               xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowsize=1.3,
+                               arrowwidth=2, arrowcolor=colour, standoff=8, text="")
+        fig.add_annotation(x=tail[-1]["ratio"], y=tail[-1]["momentum"], text=f"<b>{r['etf']}</b>", showarrow=False,
+                           xshift=22, font=dict(color=INK, size=12), bgcolor=SURFACE)
+    fig.update_layout(
+        height=620, margin=dict(l=70, r=20, t=40, b=60), paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
+        font=dict(color=INK, family="system-ui, 'Segoe UI', sans-serif"), hovermode="closest",
+        legend=dict(orientation="h", y=1.05, x=0, font=dict(color="#c3c2b7")),
+        xaxis=dict(title="RS ratio: strength against SPY (above 100 is stronger)", range=[x0, x1], gridcolor=GRID,
+                   zeroline=False, tickfont=dict(color=INK_MUTED), automargin=True, title_standoff=12),
+        yaxis=dict(title="RS momentum (above 100 is rising)", range=[y0, y1], gridcolor=GRID, zeroline=False,
+                   tickfont=dict(color=INK_MUTED), automargin=True, title_standoff=12),
+    )
+    return fig
+
+
 def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
     st.subheader(f"{ticker}  ·  ${info['spot']:,.2f}  ·  {info['bias']} ({info['trend']:+.0f})")
     if pick is not None:
@@ -339,12 +391,32 @@ def main() -> None:
     if result["errors"]:
         st.warning("Could not scan: " + ", ".join(f"{t} ({e})" for t, e in result["errors"].items()))
 
-    picks_tab, trends_tab, paper_tab, help_tab = st.tabs(
-        ["Contracts", "Watchlist trends", "Paper test", "How scoring works"]
+    picks_tab, trends_tab, rotation_tab, paper_tab, help_tab = st.tabs(
+        ["Contracts", "Watchlist trends", "Sector rotation", "Paper test", "How scoring works"]
     )
 
     with paper_tab:
         paper_test(cfg)
+
+    with rotation_tab:
+        rot = result.get("rotation") or {}
+        if not rot:
+            st.info("Sector data was unavailable on this scan.")
+        else:
+            st.plotly_chart(rotation_chart(rot), width="stretch")
+            st.caption("Each line is a sector's last 8 weeks against SPY; the large dot is now and the arrow its latest "
+                       "direction. Sectors rotate clockwise: leading, weakening, lagging, improving, then leading again.")
+            st.dataframe(pd.DataFrame([
+                {"Rank": r["rank"], "Sector": name, "ETF": r["etf"], "Quadrant": r["quadrant"].capitalize(),
+                 "RS ratio": r["ratio"], "RS momentum": r["rs_momentum"], "vs SPY, 1 month": r["rs_1m"] * 100,
+                 "vs SPY, 3 months": r["rs_3m"] * 100, "Return, 1 month": r["return_1m"] * 100}
+                for name, r in sorted(rot.items(), key=lambda kv: kv[1]["rank"])
+            ]), hide_index=True, width="stretch", column_config={
+                "RS ratio": st.column_config.NumberColumn(format="%.1f"),
+                "RS momentum": st.column_config.NumberColumn(format="%.1f"),
+                **{c: st.column_config.NumberColumn(format="%+.1f%%")
+                   for c in ("vs SPY, 1 month", "vs SPY, 3 months", "Return, 1 month")},
+            })
 
     with picks_tab:
         if contracts.empty:
