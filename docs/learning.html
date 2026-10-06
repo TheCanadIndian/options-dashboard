@@ -6,10 +6,11 @@
 <title>Options Learning</title><style>
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
 --grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
---track:#e1e0d9}
+--track:#e1e0d9;--q-lead:#1baf7a;--q-weak:#eda100;--q-lag:#e34948;--q-imp:#2a78d6}
 @media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
 --ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
---series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835}}
+--series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835;--q-lead:#199e70;--q-weak:#c98500;
+--q-lag:#e66767;--q-imp:#3987e5}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
@@ -60,6 +61,8 @@ td a{color:inherit}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
 .filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
 .card:target{outline:2px solid var(--series)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
 #chart{position:relative}#chart svg{display:block;width:100%;height:auto}
 #tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
