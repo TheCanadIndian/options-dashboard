@@ -1,8 +1,8 @@
 """Sector rotation: which sectors are gaining or losing strength against the market.
 
-Each SPDR sector ETF's price ratio to SPY gives its relative strength (RS). Over one and three
-months, and with RS momentum (this month's change in RS against last month's), each sector
-falls in one of four quadrants, as on a relative rotation graph:
+Each SPDR sector ETF's price ratio to SPY gives its relative strength (RS). Its RS ratio (strength
+against its own recent average) and RS momentum (whether that strength is rising) place it in
+one of four quadrants, as on a relative rotation graph:
 
     leading    strong and getting stronger      improving  weak but getting stronger
     weakening  strong but losing strength       lagging    weak and getting weaker
@@ -54,8 +54,25 @@ def sector_of() -> dict[str, str]:
     return sectors
 
 
+RS_WEEKS = 10  # weeks of relative strength the ratio is measured against
+MOMENTUM_WEEKS = 5  # weeks the momentum is measured against
+TAIL_WEEKS = 8  # weekly points shown behind each sector on the rotation graph
+
+
+def _quadrant(ratio: float, momentum: float) -> str:
+    if ratio >= 100:
+        return "leading" if momentum >= 100 else "weakening"
+    return "improving" if momentum >= 100 else "lagging"
+
+
 def rotation() -> dict[str, dict[str, Any]]:
-    """Relative strength, momentum and quadrant for every sector, keyed by sector name."""
+    """Relative rotation for every sector, keyed by sector name.
+
+    Weekly closes. RS ratio = 100 x (sector / SPY) / its RS_WEEKS-week average: above 100 the
+    sector is stronger than the market by its recent standard. RS momentum = 100 x RS ratio / its
+    MOMENTUM_WEEKS-week average: above 100 that strength is rising. Sectors circle clockwise
+    through leading, weakening, lagging and improving. The latest week uses today's price.
+    """
     try:
         spy = data.history("SPY")["Close"]
     except Exception:
@@ -66,17 +83,26 @@ def rotation() -> dict[str, dict[str, Any]]:
             px = data.history(etf)["Close"]
         except Exception:
             continue
-        ratio = (px / spy).dropna()
-        if len(ratio) < 70:
+        rs = (px / spy).dropna()
+        if len(rs) < 70:
             continue
-        rs1 = float(ratio.iloc[-1] / ratio.iloc[-22] - 1)
-        rs3 = float(ratio.iloc[-1] / ratio.iloc[-64] - 1)
-        prior = float(ratio.iloc[-22] / ratio.iloc[-43] - 1)
-        momentum = rs1 - prior
-        quadrant = ("leading" if rs3 >= 0 and momentum >= 0 else "weakening" if rs3 >= 0 else
-                    "improving" if momentum >= 0 else "lagging")
-        out[sector] = {"etf": etf, "rs_1m": rs1, "rs_3m": rs3, "momentum": momentum, "quadrant": quadrant,
-                       "return_1m": float(px.iloc[-1] / px.iloc[-22] - 1)}
+        weekly = rs.resample("W-FRI").last().dropna()
+        ratio = 100 * weekly / weekly.rolling(RS_WEEKS).mean()
+        momentum = 100 * ratio / ratio.rolling(MOMENTUM_WEEKS).mean()
+        path = pd.DataFrame({"ratio": ratio, "momentum": momentum}).dropna().tail(TAIL_WEEKS + 1)
+        if path.empty:
+            continue
+        last = path.iloc[-1]
+        prior = float(rs.iloc[-22] / rs.iloc[-43] - 1)
+        rs1 = float(rs.iloc[-1] / rs.iloc[-22] - 1)
+        out[sector] = {
+            "etf": etf, "rs_1m": rs1, "rs_3m": float(rs.iloc[-1] / rs.iloc[-64] - 1), "momentum": rs1 - prior,
+            "ratio": float(last["ratio"]), "rs_momentum": float(last["momentum"]),
+            "quadrant": _quadrant(float(last["ratio"]), float(last["momentum"])),
+            "return_1m": float(px.iloc[-1] / px.iloc[-22] - 1),
+            "tail": [{"week": f"{d:%b} {d.day}", "ratio": float(r.ratio), "momentum": float(r.momentum)}
+                     for d, r in path.iterrows()],
+        }
     ranked = sorted(out, key=lambda s: out[s]["rs_1m"], reverse=True)
     for i, s in enumerate(ranked, 1):
         out[s]["rank"] = i
@@ -92,8 +118,9 @@ def read(ticker: str, sector: str | None, rot: dict[str, dict[str, Any]], daily:
     row = rot[sector]
     score = float(QUADRANT_POINTS[row["quadrant"]])
     sign = "+" if score > 0 else "-"
-    reasons = [f"{sign} {sector} ({row['etf']}) is {row['quadrant']}: {row['rs_3m']:+.1%} against SPY over three months, "
-               f"momentum {row['momentum']:+.1%}; ranked {row['rank']} of {len(rot)} sectors this month"]
+    reasons = [f"{sign} {sector} ({row['etf']}) is {row['quadrant']} on the rotation graph (RS ratio "
+               f"{row['ratio']:.1f}, momentum {row['rs_momentum']:.1f}); {row['rs_1m']:+.1%} against SPY this month, "
+               f"ranked {row['rank']} of {len(rot)} sectors"]
     if not etf_sector and len(daily) > 22:
         try:
             etf = data.history(row["etf"])["Close"]

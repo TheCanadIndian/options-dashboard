@@ -24,10 +24,11 @@ LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15,
 CSS = """
 :root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
 --grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
---track:#e1e0d9}
+--track:#e1e0d9;--q-lead:#1baf7a;--q-weak:#eda100;--q-lag:#e34948;--q-imp:#2a78d6}
 @media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
 --ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
---series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835}}
+--series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835;--q-lead:#199e70;--q-weak:#c98500;
+--q-lag:#e66767;--q-imp:#3987e5}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
@@ -78,6 +79,8 @@ td a{color:inherit}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
 .filters select{font:inherit;padding:3px 6px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
 .card:target{outline:2px solid var(--series)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
 #chart{position:relative}#chart svg{display:block;width:100%;height:auto}
 #tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
 padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -450,6 +453,118 @@ def _surface_table(surf: dict[str, Any] | None) -> str:
     )
 
 
+QUADRANTS = {  # name: (CSS colour token, corner of the graph)
+    "leading": ("--q-lead", "top right"), "weakening": ("--q-weak", "bottom right"),
+    "lagging": ("--q-lag", "bottom left"), "improving": ("--q-imp", "top left"),
+}
+
+
+def _rotation_graph(rot: dict[str, Any]) -> str:
+    """Relative rotation graph: each sector's weekly path through the four quadrants."""
+    tails = {name: r["tail"] for name, r in rot.items() if r.get("tail")}
+    if not tails:
+        return ""
+    W, H, L, R, T, B = 760, 560, 64, 24, 24, 56
+    xs = [p["ratio"] for t in tails.values() for p in t]
+    ys = [p["momentum"] for t in tails.values() for p in t]
+    xspan = max(max(abs(v - 100) for v in xs) * 1.15, 1.0)
+    yspan = max(max(abs(v - 100) for v in ys) * 1.15, 1.0)
+
+    def x(v: float) -> float:
+        return L + (W - L - R) * (v - (100 - xspan)) / (2 * xspan)
+
+    def y(v: float) -> float:
+        return T + (H - T - B) * (1 - (v - (100 - yspan)) / (2 * yspan))
+
+    cx, cy = x(100), y(100)
+    parts = []
+    regions = {"leading": (cx, T, W - R - cx, cy - T), "weakening": (cx, cy, W - R - cx, H - B - cy),
+               "lagging": (L, cy, cx - L, H - B - cy), "improving": (L, T, cx - L, cy - T)}
+    for name, (rx, ry, rw, rh) in regions.items():
+        token = QUADRANTS[name][0]
+        parts.append(f'<rect x="{rx:.1f}" y="{ry:.1f}" width="{rw:.1f}" height="{rh:.1f}" fill="var({token})" opacity=".07"/>')
+        tx = rx + 10 if name in ("lagging", "improving") else rx + rw - 10
+        ty = ry + 20 if name in ("leading", "improving") else ry + rh - 10
+        anchor = "start" if name in ("lagging", "improving") else "end"
+        parts.append(f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anchor}" font-size="13" font-weight="600" '
+                     f'fill="var(--ink2)">{name.capitalize()}</text>')
+    for k in range(-2, 3):
+        gx, gy = x(100 + xspan * k / 2.5), y(100 + yspan * k / 2.5)
+        parts.append(f'<line x1="{gx:.1f}" x2="{gx:.1f}" y1="{T}" y2="{H - B}" stroke="var(--grid)"/>'
+                     f'<text x="{gx:.1f}" y="{H - B + 16}" text-anchor="middle">{100 + xspan * k / 2.5:.1f}</text>')
+        parts.append(f'<line x1="{L}" x2="{W - R}" y1="{gy:.1f}" y2="{gy:.1f}" stroke="var(--grid)"/>'
+                     f'<text x="{L - 8}" y="{gy + 4:.1f}" text-anchor="end">{100 + yspan * k / 2.5:.1f}</text>')
+    parts.append(f'<line x1="{cx:.1f}" x2="{cx:.1f}" y1="{T}" y2="{H - B}" stroke="var(--axis)" stroke-width="1.5"/>'
+                 f'<line x1="{L}" x2="{W - R}" y1="{cy:.1f}" y2="{cy:.1f}" stroke="var(--axis)" stroke-width="1.5"/>')
+    parts.append(f'<text x="{(L + W - R) / 2:.1f}" y="{H - 14}" text-anchor="middle" fill="var(--ink2)">'
+                 'RS ratio: strength against SPY (above 100 is stronger)</text>'
+                 f'<text transform="translate(16 {(T + H - B) / 2:.1f}) rotate(-90)" text-anchor="middle" fill="var(--ink2)">'
+                 'RS momentum (above 100 is rising)</text>')
+
+    markers = "".join(
+        f'<marker id="arrow-{q}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
+        f'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var({token})"/></marker>'
+        for q, (token, _) in QUADRANTS.items())
+    parts.insert(0, f"<defs>{markers}</defs>")
+    heads = []
+    for name, tail in sorted(tails.items(), key=lambda kv: rot[kv[0]]["rank"], reverse=True):
+        r = rot[name]
+        token = QUADRANTS[r["quadrant"]][0]
+        coords = [(x(p["ratio"]), y(p["momentum"])) for p in tail]
+        n = len(coords) - 1
+        for i in range(n):  # older weeks fade, the latest segment carries the direction arrow
+            (x1, y1), (x2, y2) = coords[i], coords[i + 1]
+            arrow = ""
+            if i == n - 1:  # stop at the head dot's edge so the arrowhead is visible
+                length = max(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5, 1e-6)
+                if length > 12:
+                    x2, y2 = x2 - (x2 - x1) / length * 9, y2 - (y2 - y1) / length * 9
+                    arrow = f' marker-end="url(#arrow-{r["quadrant"]})"'
+            parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="var({token})" '
+                         f'stroke-width="2" stroke-linecap="round" opacity="{0.25 + 0.55 * (i + 1) / n:.2f}"{arrow}/>')
+        for i, p in enumerate(tail):
+            head = i == n
+            tip = f"{r['etf']} {name}, week of {p['week']}: RS ratio {p['ratio']:.2f}, momentum {p['momentum']:.2f}"
+            if head:
+                tip += f" ({r['quadrant']})"
+            parts.append(
+                f'<circle cx="{coords[i][0]:.1f}" cy="{coords[i][1]:.1f}" r="{7 if head else 2.5}" fill="var({token})" '
+                f'stroke="var(--surface)" stroke-width="2" opacity="{1 if head else 0.25 + 0.5 * i / n:.2f}">'
+                f'<title>{escape(tip)}</title></circle>')
+        heads.append((coords[-1], r["etf"]))
+
+    # Labels: try right, left, above and below each head; keep the first spot that clears every
+    # label already placed and every head dot.
+    placed: list[tuple[float, float, float, float]] = []
+    dots = [c for c, _ in heads]
+    for (hx, hy), etf in heads:
+        width = 8 * len(etf) + 4
+        for dx, dy, anchor in ((11, 4, "start"), (-11, 4, "end"), (-width / 2, -12, "start"), (-width / 2, 21, "start"),
+                               (11, -10, "start"), (11, 17, "start"), (-11, -10, "end"), (-11, 17, "end")):
+            left = hx + dx - (width if anchor == "end" else 0)
+            box = (left, hy + dy - 11, left + width, hy + dy + 3)
+            clear = all(box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3] for b in placed)
+            clear = clear and all(not (box[0] - 6 < cx < box[2] + 6 and box[1] - 6 < cy < box[3] + 6)
+                                  for cx, cy in dots if (cx, cy) != (hx, hy))
+            if clear:
+                break
+        placed.append(box)
+        parts.append(f'<text x="{hx + dx:.1f}" y="{hy + dy:.1f}" text-anchor="{anchor}" font-size="12" font-weight="600" '
+                     f'fill="var(--ink)" stroke="var(--surface)" stroke-width="3" paint-order="stroke">{escape(etf)}</text>')
+
+    legend = "".join(
+        f'<span><i style="background:var({QUADRANTS[q][0]})"></i>{q.capitalize()}</span>'
+        for q in ("leading", "weakening", "lagging", "improving"))
+    return (
+        f'<div class="panel"><div class="legend">{legend}</div>'
+        f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the eleven sector ETFs" '
+        f'font-size="11" fill="var(--muted)" style="width:100%;height:auto;display:block">{"".join(parts)}</svg>'
+        f'<p class="muted small">Each line is a sector&#39;s last {len(next(iter(tails.values()))) - 1} weeks; the large '
+        'dot is now, labelled with its ETF. Sectors rotate clockwise: leading, then weakening, lagging and improving, '
+        'then back to leading. Hover over a dot for its values.</p></div>'
+    )
+
+
 def _rotation_table(rot: dict[str, Any]) -> str:
     """Sectors ranked by one-month strength against SPY, with their rotation quadrant."""
     if not rot:
@@ -458,18 +573,22 @@ def _rotation_table(rot: dict[str, Any]) -> str:
     def pct(value: float) -> str:
         return _cell(value, f"{value:+.1%}")
 
+    def level(value: float) -> str:
+        return _cell(value, f"{value:.1f}")
+
     rows = "".join(
         f'<tr>{_cell(r["rank"], str(r["rank"]))}{_cell(name, escape(name), False)}{_cell(r["etf"], r["etf"], False)}'
-        f'{_cell(r["quadrant"], marks[r["quadrant"]], False)}{pct(r["rs_1m"])}{pct(r["rs_3m"])}'
-        f'{pct(r["momentum"])}{pct(r["return_1m"])}</tr>'
+        f'{_cell(r["quadrant"], marks[r["quadrant"]], False)}{level(r["ratio"])}{level(r["rs_momentum"])}'
+        f'{pct(r["rs_1m"])}{pct(r["rs_3m"])}{pct(r["return_1m"])}</tr>'
         for name, r in sorted(rot.items(), key=lambda kv: kv[1]["rank"])
     )
     return ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Rank</th><th>Sector</th><th>ETF</th>'
-            '<th>Quadrant</th><th>vs SPY, 1 month</th><th>vs SPY, 3 months</th><th>Momentum</th><th>Return, 1 month</th>'
+            '<th>Quadrant</th><th>RS ratio</th><th>RS momentum</th><th>vs SPY, 1 month</th><th>vs SPY, 3 months</th>'
+            '<th>Return, 1 month</th>'
             f'</tr></thead><tbody>{rows}</tbody></table></div>'
             '<p class="muted small">Leading: stronger than SPY and gaining. Improving: weaker but gaining. Weakening: '
-            'stronger but losing ground. Lagging: weaker and losing ground. Momentum is this month&#39;s change in '
-            'strength against last month&#39;s.</p>')
+            'stronger but losing ground. Lagging: weaker and losing ground. RS ratio and momentum are the '
+            'graph&#39;s coordinates (100 is the market).</p>')
 
 
 def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, Any]) -> str:
@@ -571,7 +690,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 <tbody>{"".join(read_rows)}</tbody></table></div>
 <p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
 at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
-<h2>Sector rotation</h2>{_rotation_table(result.get("rotation") or {})}
+<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}{_rotation_table(result.get("rotation") or {})}
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
     built = universe.load()
     origin = (f" Universe from {escape(built['source'])}, built {_when(built['built'])} ET."
