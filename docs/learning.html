@@ -51,7 +51,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
 th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto}
-nav{display:flex;gap:6px;margin-bottom:16px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+main>*{min-width:0}
 nav a{padding:5px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
 nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
 td a{color:inherit}
@@ -69,7 +70,7 @@ padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 
 footer{margin-top:40px;color:var(--muted);font-size:12px}
 </style></head>
 <body><main>
-<nav><a href="index.html">Portfolio</a><a href="scanner.html">Scanner</a><a href="earnings.html">Earnings</a><a href="learning.html" aria-current="page">Learning</a></nav>
+<nav><a href="index.html">Home</a><a href="portfolio.html">Portfolio</a><a href="scanner.html">Scanner</a><a href="earnings.html">Earnings</a><a href="learning.html" aria-current="page">Learning</a></nav>
 <h1>What's Working</h1>
 <p class="sub">What has made money, graded in dollars per contract, and how the scanner adjusts. Updated 2026-10-05 15:48-04:00 ET.</p>
 <div class="tiles"><div class="tile"><div class="k">Contracts graded</div><div class="v">0</div><div class="d">over 0 sessions</div></div><div class="tile"><div class="k">Being followed</div><div class="v">1,276</div><div class="d">graded after 5 trading days</div></div><div class="tile"><div class="k">Earnings plays graded</div><div class="v">0</div><div class="d">held through the report</div></div><div class="tile"><div class="k">Learning</div><div class="v">Locked</div><div class="d">0 of 20 sessions needed</div></div></div>
