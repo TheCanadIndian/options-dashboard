@@ -24,81 +24,103 @@ FACTOR_LABELS = {
 LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15, "theta": 10, "delta": 10}
 
 CSS = """
-:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#898781;
---grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--series:#2a78d6;--good:#006300;--bad:#d03b3b;
---track:#e1e0d9;--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--s5:#e87ba4;--s6:#008300;--s7:#4a3aa7;
---s8:#e34948;--q-lead:#1baf7a;--q-weak:#eda100;--q-lag:#e34948;--q-imp:#2a78d6}
-@media (prefers-color-scheme:dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;
---ink2:#c3c2b7;--muted:#898781;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);
---series:#3987e5;--good:#0ca30c;--bad:#e66767;--track:#383835;--s1:#3987e5;--s2:#d95926;--s3:#199e70;
---s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;--q-lead:#199e70;--q-weak:#c98500;
---q-lag:#e66767;--q-imp:#3987e5}}
+:root{color-scheme:dark;--page:#000;--surface:#0b0b0b;--head:#140e03;--ink:#e9e9e6;--ink2:#b3b3ad;--muted:#7d7d78;
+--amber:#ffa028;--amber2:#ffbe5c;--grid:#1c1c1b;--axis:#3a3a38;--border:#272725;--series:#ffa028;--good:#2fd36b;
+--bad:#ff5252;--track:#232321;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;
+--s7:#9085e9;--s8:#e66767;--q-lead:#199e70;--q-weak:#c98500;--q-lag:#e66767;--q-imp:#3987e5;
+--mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
-h1{font-size:24px;margin:0}h2{font-size:17px;margin:36px 0 12px}
-.sub{color:var(--ink2);margin:4px 0 0}.muted{color:var(--muted)}.small{font-size:13px}
-.notice{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:16px 0 0;color:var(--ink2);font-size:13px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:20px}
-.tile,.card,.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px}
-.tile{padding:12px 14px}.tile .k{color:var(--ink2);font-size:13px}.tile .v{font-size:24px;font-weight:600}
-.tile .d{font-size:13px;color:var(--ink2)}
-.up{color:var(--good)}.down{color:var(--bad)}
-.panel{padding:14px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:14px}
-.card{padding:14px}
-.card header{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
-.card h3{margin:0;font-size:17px}.pl{font-size:17px;font-weight:600;white-space:nowrap}
-.tags{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0}
-.tag{border:1px solid var(--border);border-radius:999px;padding:1px 9px;font-size:12px;color:var(--ink2)}
-.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px 12px;margin:12px 0 0}
-.facts div span{display:block;color:var(--ink2);font-size:12px}.facts div b{font-weight:600}
-.range{margin:22px 0 4px}.bar{position:relative;height:6px;border-radius:3px;background:var(--track)}
-.bar i{position:absolute;top:-4px;width:2px;height:14px;background:var(--muted)}
-.bar u{position:absolute;top:-5px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--series);
-border:2px solid var(--surface)}
-.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--ink2);margin-top:8px}
-.review{margin:12px 0 0;padding:8px 10px;border-left:3px solid var(--series);background:var(--page);
-border-radius:4px;font-size:13px;color:var(--ink2)}.review b{color:var(--ink)}
-details{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
-summary{cursor:pointer;font-weight:600;padding:10px 0;min-height:24px}
-details h4{margin:12px 0 4px;font-size:13px;color:var(--ink2);font-weight:600}
-details ul{margin:0;padding-left:18px}details li{margin:3px 0}
-ul.plain{list-style:none;padding:0}
-.pts{display:grid;grid-template-columns:minmax(120px,1.3fr) 1fr auto;gap:4px 10px;align-items:center;font-size:13px}
-.pts .b{height:6px;border-radius:3px;background:var(--track);overflow:hidden}
-.pts .b span{display:block;height:100%;background:var(--series);border-radius:3px}
-.pts .n{font-variant-numeric:tabular-nums;color:var(--ink2)}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
-th{color:var(--ink2);font-weight:600}td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-.scroll{overflow-x:auto}
-nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+body{margin:0;background:var(--page);color:var(--ink);font:13px/1.45 var(--mono);font-variant-numeric:tabular-nums}
+a{color:var(--amber2)}
+main{max-width:1240px;margin:0 auto;padding:10px 14px 28px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#0d0d0c;
+border-bottom:1px solid var(--border);padding:6px 14px;font-size:12px}
+.brand{color:#000;background:var(--amber);font-weight:700;padding:2px 8px;letter-spacing:.08em}
+.topbar .clock{color:var(--ink2)}.topbar .clock b{color:var(--amber)}
+.tape{overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--border);background:#050505;font-size:12px}
+.tape .roll{display:inline-block;padding:5px 0;animation:roll 60s linear infinite}
+.tape span.q{margin:0 18px}.tape .sym{color:var(--amber);font-weight:600;margin-right:6px}
+@keyframes roll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.tape{overflow-x:auto}.tape .roll{animation:none}}
+nav{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0 12px}
 main>*{min-width:0}
-nav a{padding:8px 14px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);text-decoration:none;font-size:14px}
-nav a[aria-current]{background:var(--surface);color:var(--ink);font-weight:600}
-td a{color:inherit}
+nav a{padding:7px 12px;border:1px solid var(--border);color:var(--ink2);text-decoration:none;font-size:12px;
+letter-spacing:.06em;background:#0d0d0c}
+nav a b{color:var(--amber);margin-right:6px}
+nav a[aria-current]{background:var(--amber);color:#000;border-color:var(--amber)}nav a[aria-current] b{color:#000}
+h1{font-size:15px;margin:0;color:var(--amber);text-transform:uppercase;letter-spacing:.1em}
+h2{font-size:12px;margin:22px 0 8px;color:var(--amber);text-transform:uppercase;letter-spacing:.12em;
+background:var(--head);border-left:3px solid var(--amber);padding:5px 8px}
+h3{font-size:13px}h4{color:var(--amber2)}
+.sub{color:var(--muted);margin:3px 0 0;font-size:12px}.muted{color:var(--muted)}.small{font-size:11.5px}
+.notice{border:1px solid var(--border);padding:8px 10px;margin:12px 0 0;color:var(--ink2);font-size:12px;background:var(--surface)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin-top:10px}
+.tile,.card,.panel{background:var(--surface);border:1px solid var(--border)}
+.tile{padding:8px 10px}.tile .k{color:var(--amber);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em}
+.tile .v{font-size:20px;font-weight:600;margin:2px 0}.tile .d{font-size:11.5px;color:var(--muted)}
+.up{color:var(--good)}.down{color:var(--bad)}
+.panel{padding:10px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:8px}
+.card{padding:10px}
+.card header{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap;
+border-bottom:1px solid var(--border);padding-bottom:6px}
+.card h3{margin:0;font-size:13px;color:var(--ink);text-transform:uppercase;letter-spacing:.04em}
+.pl{font-size:13px;font-weight:600;white-space:nowrap}
+.tags{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0 0}
+.tag{border:1px solid #4a3410;color:var(--amber2);padding:0 6px;font-size:11px;text-transform:uppercase}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:6px 10px;margin:8px 0 0}
+.facts div span{display:block;color:var(--amber);font-size:10.5px;text-transform:uppercase}.facts div b{font-weight:600}
+.range{margin:16px 0 4px}.bar{position:relative;height:4px;background:var(--track)}
+.bar i{position:absolute;top:-4px;width:2px;height:12px;background:var(--muted)}
+.bar u{position:absolute;top:-5px;width:14px;height:14px;margin-left:-7px;background:var(--amber);border:2px solid var(--surface)}
+.ends{display:flex;justify-content:space-between;font-size:11px;color:var(--ink2);margin-top:6px}
+.review{margin:10px 0 0;padding:6px 8px;border-left:3px solid var(--amber);background:#0f0b04;font-size:12px;color:var(--ink2)}
+.review b{color:var(--ink)}
+details{margin-top:8px;border-top:1px solid var(--border);padding-top:4px}
+summary{cursor:pointer;font-weight:600;padding:10px 0;min-height:24px;color:var(--amber2);text-transform:uppercase;
+font-size:11.5px;letter-spacing:.06em}
+details h4{margin:10px 0 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+details ul{margin:0;padding-left:16px}details li{margin:2px 0}
+ul.plain{list-style:none;padding:0}
+.pts{display:grid;grid-template-columns:minmax(120px,1.3fr) 1fr auto;gap:4px 10px;align-items:center;font-size:12px}
+.pts .b{height:4px;background:var(--track);overflow:hidden}.pts .b span{display:block;height:100%;background:var(--amber)}
+.pts .n{color:var(--ink2)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #161615;vertical-align:top}
+th{color:var(--amber);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+border-bottom:1px solid #3a2a0c;background:#0e0b05}
+tbody tr:nth-child(even){background:#070707}tbody tr:hover{background:#17130a}
+td.num{white-space:nowrap}
+.scroll{overflow-x:auto}
+td a{color:var(--amber2);text-decoration:none}td a:hover{text-decoration:underline}
 .sortable th{cursor:pointer;white-space:nowrap;user-select:none}
 .sortable th[data-dir=asc]::after{content:" ▲"}.sortable th[data-dir=desc]::after{content:" ▼"}
 .sortable td{white-space:nowrap}
-.filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:14px;color:var(--ink2)}
-.filters input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin:0 6px 0 0}
+.filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px;color:var(--ink2)}
+.filters input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin:0 6px 0 0;accent-color:var(--amber)}
 .filters label{display:inline-flex;align-items:center;min-height:36px}
-.filters select{font:inherit;padding:6px 8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);border-radius:6px}
-.card:target{outline:2px solid var(--series)}
-.dbar{position:relative;height:8px;background:var(--track);border-radius:4px}
-.dbar span{position:absolute;top:0;height:8px;border-radius:4px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:14px;background:var(--axis)}
-.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink2);margin-bottom:6px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+.filters select{font:inherit;padding:6px 8px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border)}
+.card:target{outline:1px solid var(--amber)}
+.dbar{position:relative;height:6px;background:var(--track)}
+.dbar span{position:absolute;top:0;height:6px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:12px;background:var(--axis)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink2);margin-bottom:6px}
+.legend i{display:inline-block;width:9px;height:9px;margin-right:6px}
 .linechart{position:relative}.linechart svg{display:block;width:100%;height:auto}
+svg text{font-family:var(--mono)}
+.tip{position:absolute;pointer-events:none;background:#0d0d0c;border:1px solid var(--amber);padding:4px 8px;
+font-size:11.5px;white-space:nowrap;display:none}
+.statusbar{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:24px;padding:6px 10px;background:#0d0d0c;
+border:1px solid var(--border);font-size:11.5px;color:var(--ink2)}
+.statusbar b{color:var(--amber);font-weight:600;margin-right:4px}
+footer{margin-top:8px;color:var(--muted);font-size:11px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.grid2>section>h2:first-child{margin-top:22px}
+@media (max-width:1000px){.grid2{grid-template-columns:minmax(0,1fr)}}
 .mob{display:none}
 @media (max-width:640px){
 .desk{display:none}.mob{display:block}.lb-sum{display:none}
-.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.tile .v{font-size:20px}
-main{padding:16px 12px 40px}h1{font-size:21px}}
-.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;
-padding:4px 8px;font-size:12px;white-space:nowrap;display:none;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-footer{margin-top:40px;color:var(--muted);font-size:12px}
+.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.tile .v{font-size:17px}
+main{padding:8px 10px 28px}nav a{padding:8px 9px}}
 """
 
 METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA",
@@ -398,23 +420,72 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
     return _page("Portfolio", sub, body, CHART_JS + TABLE_JS)
 
 
+NAV = (("Home", "HOME", "index.html"), ("Portfolio", "PORT", "portfolio.html"), ("Strategies", "STRAT", "strategies.html"),
+       ("Scanner", "SCAN", "scanner.html"), ("Earnings", "EARN", "earnings.html"), ("Learning", "LEARN", "learning.html"))
+TAPE_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "HYG", "IBIT", "XLK", "XLF", "XLE", "XLV", "XLI", "XLY",
+                "XLP", "XLU", "XLB", "XLC", "XLRE"]
+_chrome: dict[str, str] = {"tape": "", "status": "", "clock": ""}
+
+
+def set_chrome(result: dict[str, Any] | None, state: dict[str, Any], cfg: dict[str, Any]) -> None:
+    """Ticker tape, top-bar clock and status bar shared by every page, from the latest scan."""
+    if result is None:
+        return
+    quotes = []
+    model = result.get("regime_model") or {}
+    if model.get("vix"):
+        last, prev = model["vix"]
+        quotes.append(("VIX", last, last / prev - 1 if prev else 0.0))
+    for sym in TAPE_SYMBOLS:
+        info = result["tickers"].get(sym)
+        if not info or info.get("indicators") is None or len(info["indicators"]) < 2:
+            continue
+        closes = info["indicators"]["Close"]
+        quotes.append((sym, float(info["spot"]), float(info["spot"]) / float(closes.iloc[-2]) - 1))
+    items = "".join(
+        f'<span class="q"><span class="sym">{escape(s)}</span>{p:,.2f} '
+        f'<span class="{"up" if c >= 0 else "down"}">{"▲" if c >= 0 else "▼"}{c:+.2%}</span></span>'
+        for s, p, c in quotes)
+    _chrome["tape"] = f'<div class="tape" aria-label="Market quotes"><div class="roll">{items}{items}</div></div>' if items else ""
+    scanned = result["scanned_at"]
+    _chrome["clock"] = f'LAST SCAN <b>{scanned:%m/%d %H:%M}</b> ET · 15 MIN DELAY'
+    regime = portfolio.market_regime(result, cfg)
+    total = portfolio.equity(state)
+    parts = []
+    if model:
+        parts.append(f'<span><b>REGIME</b>{escape(model["state"].upper())} {model["score"]:+.0f}</span>')
+    if regime["score"] is not None:
+        parts.append(f'<span><b>MKT DIR</b>{escape(regime["label"].upper())} {regime["score"]:+.0f}</span>')
+    parts.append(f'<span><b>CORE ACCT</b>{_money(total)} '
+                 f'<span class="{"up" if total >= state["start_cash"] else "down"}">{total / state["start_cash"] - 1:+.1%}</span></span>')
+    parts.append(f'<span><b>OPEN</b>{len(state["positions"])}</span>')
+    parts.append(f'<span><b>FLAGGED</b>{len(result["contracts"])}</span>')
+    _chrome["status"] = f'<div class="statusbar">{"".join(parts)}</div>'
+
+
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
-        f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}>{name}</a>'
-        for name, href in (("Home", "index.html"), ("Portfolio", "portfolio.html"), ("Strategies", "strategies.html"),
-                           ("Scanner", "scanner.html"), ("Earnings", "earnings.html"), ("Learning", "learning.html"))
+        f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}><b>{n}</b>{code}</a>'
+        for n, (name, code, href) in enumerate(NAV, 1)
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <meta http-equiv="refresh" content="300">
+<meta name="theme-color" content="#000000">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <title>Options {active}</title><style>{CSS}</style></head>
-<body><main>
-<nav>{nav}</nav>
+<body>
+<div class="topbar"><span class="brand">OPTIONS TERMINAL</span><span class="clock">{_chrome["clock"]}</span></div>
+{_chrome["tape"]}
+<main>
+<nav aria-label="Pages">{nav}</nav>
 <h1>{TITLES[active]}</h1>
 <p class="sub">{sub}</p>
 {body}
+{_chrome["status"]}
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
 </main><script>{script}</script></body></html>"""
 
@@ -1124,11 +1195,11 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
                 f'<tbody>{_promising_rows(rows, tickers)}</tbody></table></div>')
 
     body = f"""<div class="tiles">{tile_html}</div>
-<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}
-<h2>Market regime</h2>{_regime_section(result.get("regime_model"), portfolio.exposure_limits(result, cfg))}
-<h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div>
-<h2>Open positions</h2>{pos_table}
-<p class="small"><a href="portfolio.html">Full portfolio, with the reasoning and reviews for every trade</a></p>
+<div class="grid2"><section><h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}</section>
+<section><h2>Market regime</h2>{_regime_section(result.get("regime_model"), portfolio.exposure_limits(result, cfg))}</section></div>
+<div class="grid2"><section><h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div></section>
+<section><h2>Open positions</h2>{pos_table}
+<p class="small"><a href="portfolio.html">Full portfolio, with the reasoning and reviews for every trade</a></p></section></div>
 <h2>Promising contracts the account could buy</h2>{table(buyable)}
 <p class="muted small">The best contract per stock that passes the account&#39;s entry rules: within the
 {_money(config.max_premium(cfg), False)} per-trade limit, a bid/ask spread of {cfg['sim_max_entry_spread']:g}% or less, and
@@ -1296,6 +1367,7 @@ same moments, so differences come from the rules. Every account only buys to ope
 
 def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | None = None) -> None:
     OUT.parent.mkdir(exist_ok=True)
+    set_chrome(result, state, cfg)
     OUT.with_name("portfolio.html").write_text(render(state, cfg), encoding="utf-8")
     OUT.with_name("strategies.html").write_text(render_strategies(cfg), encoding="utf-8")
     if result is not None:

@@ -238,6 +238,7 @@ def read(breadth: float | None = None, breadth_change: float | None = None) -> d
                                                    for k, v in hist["states"].items()},
         "history_days": hist["days"], "favoured": favoured[:4], "avoid": avoid[:4],
         "breadth": breadth, "breadth_change": breadth_change,
+        "vix": [float(px["^VIX"].iloc[-1]), float(px["^VIX"].iloc[-2])],
         "path": [[str(d.date()), float(v)] for d, v in path.items() if pd.notna(v)],
     }
 
