@@ -302,6 +302,10 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
     rate = data.risk_free_rate(cfg["fallback_risk_free_rate"])
     tickers, errors = {}, {}
     context = {"rotation": sectors.rotation(), "sectors": sectors.sector_of(), "regime": None}
+    try:
+        mag7 = sectors.rotation(sectors.MAG7)
+    except Exception:
+        mag7 = {}
     try:  # breadth comes from the previous scan; this scan's is stored for the next one
         context["regime"] = regime.read(*regime.last_breadth())
     except Exception:
@@ -336,6 +340,7 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
         "errors": errors,
         "rate": rate,
         "rotation": context["rotation"],
+        "mag7_rotation": mag7,
         "regime_model": context["regime"],
         "scanned_at": datetime.now(),
     }

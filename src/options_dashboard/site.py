@@ -113,6 +113,14 @@ font-size:11.5px;white-space:nowrap;display:none}
 border:1px solid var(--border);font-size:11.5px;color:var(--ink2)}
 .statusbar b{color:var(--amber);font-weight:600;margin-right:4px}
 footer{margin-top:8px;color:var(--muted);font-size:11px}
+.rg-toggle{display:flex;gap:0;margin:0 0 10px}
+.rg-toggle input{position:absolute;opacity:0;pointer-events:none}
+.rg-toggle label{padding:7px 14px;min-height:32px;border:1px solid var(--border);background:#0d0d0c;color:var(--ink2);
+cursor:pointer;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.rg-toggle input:checked+label{background:var(--amber);border-color:var(--amber);color:#000;font-weight:600}
+.rg-toggle input:focus-visible+label{outline:2px solid var(--amber2);outline-offset:2px}
+.rg:has(.rg-toggle) .rg-pane{display:none}
+.rg:has(#rg-sec:checked) .rg-sec,.rg:has(#rg-mag7:checked) .rg-mag7{display:block}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
 .grid2>section>h2:first-child{margin-top:22px}
 @media (max-width:1000px){.grid2{grid-template-columns:minmax(0,1fr)}}
@@ -562,24 +570,37 @@ QUADRANTS = {  # name: (CSS colour token, corner of the graph)
 }
 
 
-def _rotation_graph(rot: dict[str, Any]) -> str:
-    """Relative rotation graph: each sector's weekly path through the four quadrants."""
-    tails = {name: r["tail"] for name, r in rot.items() if r.get("tail")}
-    if not tails:
+def _rotation_graph(rot: dict[str, Any], mag7: dict[str, Any] | None = None) -> str:
+    """Relative rotation graph of the sectors, with a toggle to the same graph for the Mag 7 stocks."""
+    views = [(key, label, what, r) for key, label, what, r in
+             (("sec", "Sectors", "sector ETFs", rot), ("mag7", "Mag 7", "Magnificent 7 stocks", mag7 or {}))
+             if any(v.get("tail") for v in r.values())]
+    if not views:
         return ""
     legend = "".join(
         f'<span><i style="background:var({QUADRANTS[q][0]})"></i>{q.capitalize()}</span>'
         for q in ("leading", "weakening", "lagging", "improving"))
-    return (
-        f'<div class="panel"><div class="legend">{legend}</div>'
-        f'{_both(_rotation_svg(rot, tails, (760, 560, 64, 24, 24, 56), "d"), _rotation_svg(rot, tails, (420, 440, 44, 12, 18, 44), "m"))}'
-        f'<p class="muted small">Each line is a sector&#39;s last {len(next(iter(tails.values()))) - 1} weeks; the large '
-        'dot is now, labelled with its ETF. Sectors rotate clockwise: leading, then weakening, lagging and improving, '
-        'then back to leading. Hover over (or tap) a dot for its values.</p></div>'
-    )
+    panes = []
+    for key, label, what, r in views:
+        tails = {name: v["tail"] for name, v in r.items() if v.get("tail")}
+        unit = "sector" if key == "sec" else "stock"
+        panes.append(
+            f'<div class="rg-pane rg-{key}">'
+            f'{_both(_rotation_svg(r, tails, (760, 560, 64, 24, 24, 56), key + "d", what), _rotation_svg(r, tails, (420, 440, 44, 12, 18, 44), key + "m", what))}'
+            f'<p class="muted small">Each line is a {unit}&#39;s last {len(next(iter(tails.values()))) - 1} weeks against '
+            f'SPY; the large dot is now, labelled with its ticker. They rotate clockwise: leading, then weakening, lagging '
+            f'and improving, then back to leading. Hover over (or tap) a dot for its values.</p></div>')
+    toggle = ""
+    if len(views) > 1:
+        toggle = "".join(
+            f'<input type="radio" name="rg" id="rg-{key}" class="rg-{key}-in"{" checked" if i == 0 else ""}>'
+            f'<label for="rg-{key}">{label}</label>' for i, (key, label, _, _) in enumerate(views))
+        toggle = f'<div class="rg-toggle" role="radiogroup" aria-label="Rotation graph">{toggle}</div>'
+    return f'<div class="panel rg">{toggle}<div class="legend">{legend}</div>{"".join(panes)}</div>'
 
 
-def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, prefix: str) -> str:
+def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, prefix: str,
+                  what: str = "sector ETFs") -> str:
     """One drawing of the rotation graph at the given (width, height, left, right, top, bottom)."""
     W, H, L, R, T, B = size
     narrow = W < 600
@@ -671,7 +692,7 @@ def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, pref
         parts.append(f'<text x="{hx + dx:.1f}" y="{hy + dy:.1f}" text-anchor="{anchor}" font-size="12" font-weight="600" '
                      f'fill="var(--ink)" stroke="var(--surface)" stroke-width="3" paint-order="stroke">{escape(etf)}</text>')
 
-    return (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the eleven sector ETFs" '
+    return (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the {what}" '
             f'font-size="11" fill="var(--muted)" style="width:100%;height:auto;display:block">{"".join(parts)}</svg>')
 
 
@@ -801,7 +822,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 <tbody>{"".join(read_rows)}</tbody></table></div>
 <p class="muted small">Read and method scores run from −100 (bearish) to +100 (bullish). A ticker needs a read of
 at least ±{cfg['min_trend_strength']} before any contract is flagged.</p>
-<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}{_rotation_table(result.get("rotation") or {})}
+<h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {}, result.get("mag7_rotation"))}{_rotation_table(result.get("rotation") or {})}
 <h2>Reasoning by ticker</h2><div class="cards">{"".join(cards)}</div>"""
     built = universe.load()
     origin = (f" Universe from {escape(built['source'])}, built {_when(built['built'])} ET."
@@ -1195,7 +1216,7 @@ def render_home(result: dict[str, Any], state: dict[str, Any], cfg: dict[str, An
                 f'<tbody>{_promising_rows(rows, tickers)}</tbody></table></div>')
 
     body = f"""<div class="tiles">{tile_html}</div>
-<div class="grid2"><section><h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {})}</section>
+<div class="grid2"><section><h2>Sector rotation</h2>{_rotation_graph(result.get("rotation") or {}, result.get("mag7_rotation"))}</section>
 <section><h2>Market regime</h2>{_regime_section(result.get("regime_model"), portfolio.exposure_limits(result, cfg))}</section></div>
 <div class="grid2"><section><h2>Account value</h2><div class="panel">{_chart(state["equity"], start)}</div></section>
 <section><h2>Open positions</h2>{pos_table}

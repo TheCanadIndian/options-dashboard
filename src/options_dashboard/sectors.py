@@ -28,6 +28,8 @@ SECTOR_ETFS = {
     "Consumer Discretionary": "XLY", "Consumer Staples": "XLP", "Utilities": "XLU", "Basic Materials": "XLB",
     "Real Estate": "XLRE", "Telecommunications": "XLC",
 }
+MAG7 = {"Apple": "AAPL", "Microsoft": "MSFT", "Alphabet": "GOOGL", "Amazon": "AMZN", "Nvidia": "NVDA",
+        "Meta": "META", "Tesla": "TSLA"}
 QUADRANT_POINTS = {"leading": 30, "improving": 15, "weakening": -15, "lagging": -30}
 SECTOR_FILE = STATE_DIR / "sectors.json"
 
@@ -65,8 +67,8 @@ def _quadrant(ratio: float, momentum: float) -> str:
     return "improving" if momentum >= 100 else "lagging"
 
 
-def rotation() -> dict[str, dict[str, Any]]:
-    """Relative rotation for every sector, keyed by sector name.
+def rotation(symbols: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
+    """Relative rotation for every sector (or the given name -> ticker map), keyed by name.
 
     Weekly closes. RS ratio = 100 x (sector / SPY) / its RS_WEEKS-week average: above 100 the
     sector is stronger than the market by its recent standard. RS momentum = 100 x RS ratio / its
@@ -78,7 +80,7 @@ def rotation() -> dict[str, dict[str, Any]]:
     except Exception:
         return {}
     out = {}
-    for sector, etf in SECTOR_ETFS.items():
+    for sector, etf in (symbols or SECTOR_ETFS).items():
         try:
             px = data.history(etf)["Close"]
         except Exception:
