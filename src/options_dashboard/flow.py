@@ -15,6 +15,10 @@ flow explains is treated as unknown, contributing nothing, rather than assumed t
 
 Coverage (classified volume as a share of open interest) says how much of the open interest
 this explains. It starts near zero and builds as sessions accumulate.
+
+Each scan also keeps every near-dated contract's implied volatility. The last reading of a
+session becomes the close the next session's changes are measured from, so each strike's own
+IV move (skew steepening or flattening, not just the 30-day average) can drive the vanna read.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from .config import STATE_DIR
 DIR = STATE_DIR / "flow"
 SESSIONS = 10  # sessions of classified flow kept per ticker
 EDGE = 0.25  # share of the spread at each end that counts as hitting the bid or lifting the offer
+IV_MAX_DTE = 60  # implied volatility is kept for contracts expiring within this many days
 
 
 def _load(ticker: str) -> dict[str, Any]:
@@ -45,7 +50,13 @@ def record(ticker: str, chain: pd.DataFrame) -> None:
     state = _load(ticker)
     today = date.today().isoformat()
     if state.get("seen_day") != today:
-        state["seen"], state["seen_day"] = {}, today  # volume counters restart each session
+        if state.get("iv_last"):  # the previous session's final readings become the close
+            state["iv_close"], state["iv_close_day"] = state["iv_last"], state.get("seen_day")
+        state["seen"], state["seen_day"], state["iv_last"] = {}, today, {}
+    quoted = chain[(chain["openInterest"] > 0) & (chain["bid"] > 0) & (chain["dte"] <= IV_MAX_DTE)
+                   & chain["impliedVolatility"].between(0.03, 5)]
+    state.setdefault("iv_last", {}).update(
+        {s: round(float(v), 4) for s, v in zip(quoted["contractSymbol"], quoted["impliedVolatility"])})
     tally = state["days"].setdefault(today, {})
 
     traded = chain[(chain["volume"] > 0) & (chain["bid"] > 0) & (chain["ask"] > chain["bid"])]
@@ -69,6 +80,22 @@ def record(ticker: str, chain: pd.DataFrame) -> None:
         del state["days"][old]
     DIR.mkdir(parents=True, exist_ok=True)
     (DIR / f"{ticker}.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def iv_changes(ticker: str, chain: pd.DataFrame) -> tuple[np.ndarray, str | None]:
+    """Each contract's implied volatility change in vol points since the prior session's close,
+    aligned with `chain` (NaN where either reading is missing), and the day of that close."""
+    state = _load(ticker)
+    close = state.get("iv_close") or {}
+    if not close:
+        return np.full(len(chain), np.nan), None
+    then = np.array([close.get(s, np.nan) for s in chain["contractSymbol"]], dtype=float)
+    now = chain["impliedVolatility"].to_numpy(dtype=float)
+    now = np.where((now > 0.03) & (now < 5) & (chain["bid"].to_numpy(dtype=float) > 0), now, np.nan)
+    return np.clip(100 * (now - then), -IV_MOVE_CAP, IV_MOVE_CAP), state.get("iv_close_day")
+
+
+IV_MOVE_CAP = 25.0  # vol points; a larger one-day move in one strike is more likely a bad quote
 
 
 def customer_positions(ticker: str, chain: pd.DataFrame) -> tuple[np.ndarray, dict[str, Any]]:

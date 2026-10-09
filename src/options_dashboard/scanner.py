@@ -119,6 +119,7 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
             note = f"inferred from the stock's {week:+.1%} move this week"
         near = chain[chain["dte"] <= GAMMA_MAX_DTE].copy()
         near["customer"], summary = flow.customer_positions(ticker, near)
+        near["iv_change"], summary["iv_close_day"] = flow.iv_changes(ticker, near)
         return structure.gamma(near, spot, rate, adv_dollars, trend, note, summary)
 
     atr = float(ind["atr"].iloc[-1])

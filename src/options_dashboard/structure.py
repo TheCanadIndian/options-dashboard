@@ -247,6 +247,7 @@ def signed_short(x: float) -> str:
 
 
 FLOW_MIN = 0.002  # vanna flow per vol point below this share of average daily dollar volume is ignored
+STRIKE_IV_MIN = 0.5  # share of the dealer vanna (by size) whose strikes need an IV change to use them
 # Charm flow is positive for almost every stock (out-of-the-money options dominate and their
 # delta decays toward zero), so it only counts when it is large.
 CHARM_MIN = 0.01
@@ -267,7 +268,10 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
     interest the classified flow covers, and every signed reading is weighted by that coverage.
 
     Gamma walls need no side: they are where gamma is most concentrated. `vol_trend` is -1
-    when implied volatility is falling, +1 when rising and 0 when unknown.
+    when implied volatility is falling, +1 when rising and 0 when unknown. When the chain has an
+    `iv_change` column (vol points since the prior close, per contract), vanna is realised strike
+    by strike instead: put IV rising faster than call IV on a sell-off moves dealers differently
+    from a parallel shift, and `vol_trend` is only the fallback.
     """
     # Contracts expiring today are left out: their gamma swamps the walls and is gone by the close.
     df = chain[
@@ -301,6 +305,18 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
     at_spot = greeks.greeks(spot, K, T, rate, iv, 0.0, is_call)
     net = float(exposure(spot, dealer).sum())
     vanna_flow = float((at_spot["vanna"] * dealer * 100 * spot).sum())  # stock dealers buy per 1-point fall in IV
+    # Per-strike: stock dealers have bought on today's actual IV moves (rising IV, dsigma > 0, at a
+    # strike where the dealer's vanna is positive makes them sell).
+    dsigma = df["iv_change"].to_numpy(dtype=float) if "iv_change" in df else np.full(len(df), np.nan)
+    dealer_vanna = at_spot["vanna"] * dealer * 100 * spot
+    seen = ~np.isnan(dsigma)
+    size = float(np.abs(dealer_vanna).sum())
+    strike_share = float(np.abs(dealer_vanna[seen]).sum() / size) if size else 0.0
+    realised = float(-(dealer_vanna[seen] * dsigma[seen]).sum())
+
+    def skew_move(calls: bool) -> float | None:
+        pick = seen & (is_call == calls) & (oi > 0)
+        return float(np.average(dsigma[pick], weights=oi[pick])) if pick.any() else None
     charm_flow = float(-(at_spot["charm"] * dealer * 100 * spot).sum())  # stock dealers buy per day
     customer_dex = float((at_spot["delta"] * customer * 100 * spot).sum())
     gross_dex = float((np.abs(at_spot["delta"]) * oi * 100 * spot).sum())
@@ -359,7 +375,20 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
 
     # A flow only counts when it is a meaningful share of a normal day's trading.
     vanna_now = -vol_trend * vanna_flow  # falling IV (trend -1) realises the flow as written
-    if vol_trend == 0 or abs(vanna_flow) < FLOW_MIN * adv_dollars:
+    if strike_share >= STRIKE_IV_MIN:
+        puts, calls = skew_move(False), skew_move(True)
+        moves = ", ".join(f"{name} IV {m:+.1f} pts" for name, m in (("put", puts), ("call", calls)) if m is not None)
+        since = f" since the {flow['iv_close_day']} close" if flow.get("iv_close_day") else ""
+        if abs(realised) < FLOW_MIN * adv_dollars:
+            reasons.append(f"= Vanna, strike by strike ({moves}{since}): dealers {'bought' if realised >= 0 else 'sold'} "
+                           f"about {_short(realised)} of stock, too small to lean on")
+        else:
+            score += (20 if realised > 0 else -20) * confidence
+            reasons.append(
+                f"{'+' if realised > 0 else '-'} Vanna {'tailwind' if realised > 0 else 'headwind'}, strike by strike "
+                f"({moves}{since}): each strike's own IV move has dealers {'buying' if realised > 0 else 'selling'} "
+                f"about {_short(realised)} of stock{weight}")
+    elif vol_trend == 0 or abs(vanna_flow) < FLOW_MIN * adv_dollars:
         reasons.append(f"= Vanna: dealers would {'buy' if vanna_flow >= 0 else 'sell'} {_short(vanna_flow)} of stock "
                        f"per 1-point fall in implied volatility, too small or too unclear to lean on")
     else:
@@ -378,8 +407,8 @@ def gamma(chain: pd.DataFrame, spot: float, rate: float, adv_dollars: float,
             f"dealers must {'buy' if charm_flow > 0 else 'sell'} about {_short(charm_flow)} of stock a day{weight}")
 
     return _out(score, reasons, call_wall=call_wall, put_wall=put_wall, flip=flip, net_gex=net,
-                vanna_flow=vanna_flow, charm_flow=charm_flow, customer_dex=customer_dex,
-                coverage=coverage, confidence=confidence)
+                vanna_flow=vanna_flow, vanna_realised=realised if strike_share >= STRIKE_IV_MIN else None,
+                charm_flow=charm_flow, customer_dex=customer_dex, coverage=coverage, confidence=confidence)
 
 
 # ---------------------------------------------------------------- composite
