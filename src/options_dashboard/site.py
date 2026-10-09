@@ -1348,7 +1348,8 @@ def render_strategies(cfg: dict[str, Any]) -> str:
                      _multi_chart(series, float(cfg["account_size"]), 420))
 
     chart = (f'<h4 style="margin:0 0 8px">Rule changes</h4>{group_chart("rules")}'
-             f'<h4 style="margin:24px 0 8px">Scoring weights</h4>{group_chart("weights")}')
+             f'<h4 style="margin:24px 0 8px">Scoring weights</h4>{group_chart("weights")}'
+             f'<h4 style="margin:24px 0 8px">Short-dated: weeklies and day trades</h4>{group_chart("short")}')
 
     def describe(key: str, value: Any) -> str:
         if key == "method_weights":

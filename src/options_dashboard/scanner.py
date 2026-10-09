@@ -191,7 +191,7 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float, context: dict[str
             f"{r[0]} {structure.METHOD_NAMES[k]}: {r[2:]}" for k, p in reads.items() if p for r in p["reasons"]
         ],
     }
-    result["contracts"] = pd.DataFrame(columns=COLUMNS)
+    result["contracts"] = result["short_contracts"] = pd.DataFrame(columns=COLUMNS)
     result["chain_source"] = quote.get("source")
     result["surface"] = {k: v for k, v in surf.items() if k != "residuals"} if surf else None
     result["earnings"], result["earnings_outlook"] = report, None
@@ -203,98 +203,107 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float, context: dict[str
     if direction == "neutral" or chain is None or chain.empty:
         return result
     side = "call" if direction == "bullish" else "put"
-    df = chain[(chain["type"] == side) & chain["dte"].between(cfg["min_dte"], cfg["max_dte"])].copy()
+    empty = pd.DataFrame(columns=COLUMNS)
 
-    # A contract without a two-sided quote falls back to its last trade and is flagged.
-    quoted = (df["bid"] > 0) & (df["ask"] > 0)
-    df["stale"] = ~quoted
-    df["mid"] = np.where(quoted, (df["bid"] + df["ask"]) / 2, df["lastPrice"])
-    df["spread_pct"] = np.where(quoted, (df["ask"] - df["bid"]) / df["mid"] * 100, np.nan)
-    df["cost"] = np.where(quoted, df["ask"], df["lastPrice"]) * 100
+    def pick(lo: int, hi: int) -> pd.DataFrame:
+        """Scored contracts expiring in lo..hi days."""
+        df = chain[(chain["type"] == side) & chain["dte"].between(lo, hi)].copy()
 
-    # Picks are at or out of the money only. In-the-money contracts still count everywhere the
-    # whole chain is read (dealer gamma, vanna, charm, customer DEX and the volatility surface).
-    at_or_out = np.where(df["type"] == "call", df["strike"] >= spot * (1 - ATM_BAND), df["strike"] <= spot * (1 + ATM_BAND))
-    df = df[
-        at_or_out
-        & (df["mid"] > 0.05)
-        & (df["strike"].between(spot * 0.7, spot * 1.3))
-        & (df["openInterest"] >= cfg["min_open_interest"])
-        & (df["volume"] >= cfg["min_volume"])
-        & (df["stale"] | (df["spread_pct"] <= cfg["max_spread_pct"]))
-    ].copy()
-    if df.empty:
-        return result
+        # A contract without a two-sided quote falls back to its last trade and is flagged.
+        quoted = (df["bid"] > 0) & (df["ask"] > 0)
+        df["stale"] = ~quoted
+        df["mid"] = np.where(quoted, (df["bid"] + df["ask"]) / 2, df["lastPrice"])
+        df["spread_pct"] = np.where(quoted, (df["ask"] - df["bid"]) / df["mid"] * 100, np.nan)
+        df["cost"] = np.where(quoted, df["ask"], df["lastPrice"]) * 100
 
-    q = data.dividend_yield(ticker)
-    is_call = (df["type"] == "call").to_numpy()
-    T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
-    K = df["strike"].to_numpy(dtype=float)
-    mid = df["mid"].to_numpy(dtype=float)
+        # Picks are at or out of the money only. In-the-money contracts still count everywhere the
+        # whole chain is read (dealer gamma, vanna, charm, customer DEX and the volatility surface).
+        at_or_out = np.where(df["type"] == "call", df["strike"] >= spot * (1 - ATM_BAND), df["strike"] <= spot * (1 + ATM_BAND))
+        df = df[
+            at_or_out
+            & (df["mid"] > 0.05)
+            & (df["strike"].between(spot * 0.7, spot * 1.3))
+            & (df["openInterest"] >= cfg["min_open_interest"])
+            & (df["volume"] >= cfg["min_volume"])
+            & (df["stale"] | (df["spread_pct"] <= cfg["max_spread_pct"]))
+        ].copy()
+        if df.empty:
+            return empty
 
-    solved = np.array(
-        [greeks.implied_vol(p, spot, k, t, rate, q, c) for p, k, t, c in zip(mid, K, T, is_call)]
-    )
-    listed_iv = df["impliedVolatility"].to_numpy(dtype=float)  # the data source's own IV
-    iv = np.where(np.isnan(solved), listed_iv, solved)
-    keep = iv > 0.03
-    df, is_call, T, K, mid, iv = df[keep].copy(), is_call[keep], T[keep], K[keep], mid[keep], iv[keep]
-    if df.empty:
-        return result
+        q = data.dividend_yield(ticker)
+        is_call = (df["type"] == "call").to_numpy()
+        T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
+        K = df["strike"].to_numpy(dtype=float)
+        mid = df["mid"].to_numpy(dtype=float)
 
-    for name, values in greeks.greeks(spot, K, T, rate, iv, q, is_call).items():
-        df[name] = values
-    df["iv"] = iv
-    df = df[df["delta"].abs().between(cfg["min_delta"], cfg["max_delta"])].copy()
-    if df.empty:
-        return result
+        solved = np.array(
+            [greeks.implied_vol(p, spot, k, t, rate, q, c) for p, k, t, c in zip(mid, K, T, is_call)]
+        )
+        listed_iv = df["impliedVolatility"].to_numpy(dtype=float)  # the data source's own IV
+        iv = np.where(np.isnan(solved), listed_iv, solved)
+        keep = iv > 0.03
+        df, is_call, T, K, mid, iv = df[keep].copy(), is_call[keep], T[keep], K[keep], mid[keep], iv[keep]
+        if df.empty:
+            return empty
 
-    is_call = (df["type"] == "call").to_numpy()
-    T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
-    iv = df["iv"].to_numpy()
-    df["breakeven"] = np.where(is_call, df["strike"] + df["mid"], df["strike"] - df["mid"])
-    above = greeks.prob_above(spot, df["breakeven"].to_numpy(), T, rate, iv, q)
-    df["pop"] = np.where(is_call, above, 1 - above)
-    df["breakeven_move"] = (df["breakeven"] / spot - 1).abs()
-    df["expected_move"] = iv * np.sqrt(T)
-    df["theta_pct"] = df["theta"].abs() / df["mid"]
-    df["leverage"] = df["delta"].abs() * spot / df["mid"]
-    df["iv_hv"] = iv / snap["hv20"] if snap["hv20"] > 0 else np.nan
-    # Positive moneyness is out of the money: how far the stock must move to reach the strike.
-    df["moneyness"] = np.where(is_call, df["strike"] / spot - 1, 1 - df["strike"] / spot)
-    target = structural_target(levels, spot, snap["atr_pct"] * spot, direction == "bullish")
-    if target:
-        df["target_price"], df["target_label"] = target
-        df["target_move"] = abs(target[0] / spot - 1)
-        # Full points when the breakeven sits inside the target, none when it needs twice the distance.
-        reach = _scale(df["breakeven_move"] / df["target_move"], 1.0, 2.0)
-    else:
-        df["target_price"], df["target_label"], df["target_move"] = np.nan, None, np.nan
-        reach = np.full(len(df), 0.5)  # no level to aim at: neither reward nor penalise
+        for name, values in greeks.greeks(spot, K, T, rate, iv, q, is_call).items():
+            df[name] = values
+        df["iv"] = iv
+        df = df[df["delta"].abs().between(cfg["min_delta"], cfg["max_delta"])].copy()
+        if df.empty:
+            return empty
 
-    spread = _scale(df["spread_pct"].fillna(cfg["max_spread_pct"] / 2), 0, cfg["max_spread_pct"])
-    parts = {
-        "trend": np.full(len(df), min(abs(score) / FULL_CONVICTION, 1.0)),
-        "gamma": structure.gamma_fit(reads["gamma"], is_call, df["breakeven"].to_numpy(), spot),
-        "liquidity": 0.6 * spread + 0.4 * _scale(np.log10(df["openInterest"] + 1), 3.5, 1.5),
-        "breakeven": _scale(df["breakeven_move"] / df["expected_move"], 0.4, 1.5),
-        "iv_value": _iv_value(df, surf, levels),
-        "theta": _scale(df["theta_pct"], 0.005, 0.04),
-        "target": reach,
-    }
-    # Raw 0-1 readings are kept so the journal can re-score contracts under other weights.
-    weights = learning.active("factors", WEIGHTS)
-    for k in WEIGHTS:
-        df[f"f_{k}"] = np.asarray(parts[k], dtype=float)
-        df[f"pts_{k}"] = np.round(weights[k] * parts[k], 1)
-    df["score"] = sum(weights[k] * parts[k] for k in WEIGHTS).round(1)
-    df["score_control"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)  # original weights
+        is_call = (df["type"] == "call").to_numpy()
+        T = np.maximum(df["dte"].to_numpy(dtype=float), 0.5) / 365.0
+        iv = df["iv"].to_numpy()
+        df["breakeven"] = np.where(is_call, df["strike"] + df["mid"], df["strike"] - df["mid"])
+        above = greeks.prob_above(spot, df["breakeven"].to_numpy(), T, rate, iv, q)
+        df["pop"] = np.where(is_call, above, 1 - above)
+        df["breakeven_move"] = (df["breakeven"] / spot - 1).abs()
+        df["expected_move"] = iv * np.sqrt(T)
+        df["theta_pct"] = df["theta"].abs() / df["mid"]
+        df["leverage"] = df["delta"].abs() * spot / df["mid"]
+        df["iv_hv"] = iv / snap["hv20"] if snap["hv20"] > 0 else np.nan
+        # Positive moneyness is out of the money: how far the stock must move to reach the strike.
+        df["moneyness"] = np.where(is_call, df["strike"] / spot - 1, 1 - df["strike"] / spot)
+        target = structural_target(levels, spot, snap["atr_pct"] * spot, direction == "bullish")
+        if target:
+            df["target_price"], df["target_label"] = target
+            df["target_move"] = abs(target[0] / spot - 1)
+            # Full points when the breakeven sits inside the target, none when it needs twice the distance.
+            reach = _scale(df["breakeven_move"] / df["target_move"], 1.0, 2.0)
+        else:
+            df["target_price"], df["target_label"], df["target_move"] = np.nan, None, np.nan
+            reach = np.full(len(df), 0.5)  # no level to aim at: neither reward nor penalise
 
-    df["earnings_before_expiry"] = (
-        pd.to_datetime(df["expiration"]).dt.date >= report if report else False
-    )
-    df["ticker"], df["spot"], df["trend"], df["bias"] = ticker, spot, score, direction
-    result["contracts"] = df[COLUMNS].sort_values("score", ascending=False).reset_index(drop=True)
+        spread = _scale(df["spread_pct"].fillna(cfg["max_spread_pct"] / 2), 0, cfg["max_spread_pct"])
+        parts = {
+            "trend": np.full(len(df), min(abs(score) / FULL_CONVICTION, 1.0)),
+            "gamma": structure.gamma_fit(reads["gamma"], is_call, df["breakeven"].to_numpy(), spot),
+            "liquidity": 0.6 * spread + 0.4 * _scale(np.log10(df["openInterest"] + 1), 3.5, 1.5),
+            "breakeven": _scale(df["breakeven_move"] / df["expected_move"], 0.4, 1.5),
+            "iv_value": _iv_value(df, surf, levels),
+            "theta": _scale(df["theta_pct"], 0.005, 0.04),
+            "target": reach,
+        }
+        # Raw 0-1 readings are kept so the journal can re-score contracts under other weights.
+        weights = learning.active("factors", WEIGHTS)
+        for k in WEIGHTS:
+            df[f"f_{k}"] = np.asarray(parts[k], dtype=float)
+            df[f"pts_{k}"] = np.round(weights[k] * parts[k], 1)
+        df["score"] = sum(weights[k] * parts[k] for k in WEIGHTS).round(1)
+        df["score_control"] = sum(WEIGHTS[k] * parts[k] for k in WEIGHTS).round(1)  # original weights
+
+        df["earnings_before_expiry"] = (
+            pd.to_datetime(df["expiration"]).dt.date >= report if report else False
+        )
+        df["ticker"], df["spot"], df["trend"], df["bias"] = ticker, spot, score, direction
+        return df[COLUMNS].sort_values("score", ascending=False).reset_index(drop=True)
+
+    result["contracts"] = pick(cfg["min_dte"], cfg["max_dte"])
+    # Weeklies and same-day trades are scored apart so they never crowd the swing picks, the
+    # journal or the alerts; only accounts trading the short pool see them.
+    result["short_contracts"] = pick(cfg["short_min_dte"], cfg["short_max_dte"])
     return result
 
 
@@ -329,14 +338,16 @@ def scan(cfg: dict[str, Any]) -> dict[str, Any]:
         regime.breadth_now(tickers)
     except Exception:
         pass
-    frames = [r["contracts"] for r in tickers.values() if not r["contracts"].empty]
-    contracts = (
-        pd.concat(frames, ignore_index=True).sort_values("score", ascending=False)
-        if frames
-        else pd.DataFrame(columns=COLUMNS)
-    )
+    def pool(key: str) -> pd.DataFrame:
+        frames = [r[key] for r in tickers.values() if not r.get(key, pd.DataFrame()).empty]
+        if not frames:
+            return pd.DataFrame(columns=COLUMNS)
+        return pd.concat(frames, ignore_index=True).sort_values("score", ascending=False).reset_index(drop=True)
+
+    contracts = pool("contracts")
     return {
-        "contracts": contracts.reset_index(drop=True),
+        "contracts": contracts,
+        "short_contracts": pool("short_contracts"),
         "tickers": tickers,
         "errors": errors,
         "rate": rate,

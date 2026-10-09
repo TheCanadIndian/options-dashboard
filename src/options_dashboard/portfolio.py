@@ -159,6 +159,13 @@ def _manage(state: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
                 _close(state, pos, "Target hit", now, cfg)
             elif dte <= cfg["sim_exit_dte"]:
                 _close(state, pos, "Time limit", now, cfg)
+            elif cfg.get("sim_flatten_time") and _past(cfg["sim_flatten_time"]):
+                _close(state, pos, "End of day", now, cfg)  # day trades are never held overnight
+
+
+def _past(hhmm: str) -> bool:
+    """Whether New York time has reached hh:mm today."""
+    return datetime.now(NEW_YORK).time() >= clock(*map(int, hhmm.split(":")))
 
 
 
@@ -259,6 +266,15 @@ def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str
         return "outside its expiry range"
     if cfg.get("sim_min_moneyness") is not None and row["moneyness"] < cfg["sim_min_moneyness"]:
         return "not far enough out of the money"
+    if cfg.get("sim_require_short_gamma"):
+        lv = info.get("levels", {})
+        spot = float(row["spot"])
+        near = [v for v in (lv.get("flip"), lv.get("call_wall"), lv.get("put_wall"))
+                if v and abs(v / spot - 1) <= cfg["sim_gamma_distance"]]
+        if lv.get("net_gex") is None or lv["net_gex"] >= 0:
+            return "dealers are not net short gamma"
+        if not near:
+            return "not near the gamma flip or a wall"
     if cfg.get("sim_skip_avoided_sectors") and avoided and info.get("levels", {}).get("sector") in avoided:
         return "out-of-favour sector"
     if cfg.get("sim_use_regime", True):
@@ -314,12 +330,16 @@ def account_scores(contracts: pd.DataFrame, result: dict[str, Any], cfg: dict[st
 
 
 def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
-    contracts = result["contracts"]
+    contracts = result.get("short_contracts") if cfg.get("sim_pool") == "short" else result["contracts"]
+    if contracts is None:
+        return
     if contracts.empty:
         return
     ny = datetime.now(NEW_YORK)
     if ny.time() < clock(*map(int, cfg["sim_first_buy_time"].split(":"))):
         return  # opening spreads are wide
+    if cfg.get("sim_last_buy_time") and _past(cfg["sim_last_buy_time"]):
+        return
     room_today = cfg["sim_max_buys_per_day"] - buys_today(state, now[:10])
     allowed = min(cfg["sim_max_buys_per_scan"], room_today)
     if allowed <= 0:

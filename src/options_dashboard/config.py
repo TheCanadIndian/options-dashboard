@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "risk_per_trade_pct": 15.0,  # max premium per contract as % of account
     "min_dte": 21,
     "max_dte": 90,  # scanner window; each simulated account narrows it with sim_min_dte / sim_max_dte
+    "short_min_dte": 0,  # short-dated pool, for the weeklies and gamma day-trade accounts only
+    "short_max_dte": 14,
     "min_delta": 0.15,  # low enough to include out-of-the-money strikes
     "max_delta": 0.70,
     "min_open_interest": 100,
@@ -79,6 +81,11 @@ DEFAULTS: dict[str, Any] = {
     "sim_max_buys_per_day": 2,
     "sim_commission": 0.65,  # per contract, each way
     "sim_reentry_days": 2,  # wait this long before re-buying a ticker after selling it
+    "sim_pool": "swing",  # "swing" buys from the scanner's picks, "short" from the 0-14 day pool
+    "sim_flatten_time": None,  # New York time to sell everything still open (day trading), e.g. "15:45"
+    "sim_last_buy_time": None,  # New York time after which no new buys are made
+    "sim_require_short_gamma": False,  # only buy when dealers are net short gamma near the flip or a wall
+    "sim_gamma_distance": 0.02,  # how near the flip or a wall counts, as a share of the price
     "site_push": True,  # commit and push docs/ to GitHub after each scan
     # Simulated accounts, each starting with account_size and trading the same scans under its own
     # rules. All of them only buy to open (long calls and puts) and sell to close. "core" is the main
@@ -102,6 +109,21 @@ DEFAULTS: dict[str, Any] = {
          "rules": {"sim_use_regime": False}},
         {"id": "skip_weak_sectors", "group": "rules", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
          "rules": {"sim_skip_avoided_sectors": True}},
+        {"id": "weeklies", "group": "short", "name": "Weeklies",
+         "summary": "7 to 14 days to expiry; exits at +40% or -30%, sells with 2 days left, reviewed after 1 day",
+         "rules": {"sim_pool": "short", "sim_min_dte": 7, "sim_max_dte": 14, "sim_target_pct": 40.0,
+                   "sim_stop_pct": 30.0, "sim_exit_dte": 2, "sim_review_min_days": 1,
+                   "factor_weights": {"trend": 30, "liquidity": 15, "breakeven": 15, "iv_value": 10, "gamma": 15,
+                                      "theta": 5, "target": 10}, "sim_min_score": 60}},
+        {"id": "gamma_day", "group": "short", "name": "Gamma day trades",
+         "summary": "0 to 7 days; only when dealers are short gamma within 2% of the flip or a wall; "
+                    "exits at +30% or -25% and sells everything by 15:45",
+         "rules": {"sim_pool": "short", "sim_min_dte": 0, "sim_max_dte": 7, "sim_target_pct": 30.0,
+                   "sim_stop_pct": 25.0, "sim_exit_dte": -1, "sim_review_min_days": 0,
+                   "sim_flatten_time": "15:45", "sim_last_buy_time": "14:30", "sim_require_short_gamma": True,
+                   "sim_reentry_days": 0, "sim_max_entry_spread": 10.0,
+                   "factor_weights": {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 5, "gamma": 25,
+                                      "theta": 0, "target": 5}, "sim_min_score": 60}},
         {"id": "w_flows", "name": "Dealer-flow weighted", "group": "weights",
          "summary": "Market read led by dealer gamma, vanna, charm and DEX (35%)",
          "rules": {"method_weights": {"auction": 0.15, "gamma": 0.35, "wyckoff": 0.08, "vpa": 0.08, "avwap": 0.10,
