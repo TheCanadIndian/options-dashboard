@@ -78,12 +78,36 @@ def _earnings_results(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _latest_grades(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every contract at its longest completed horizon: the final 15-day grade once retired,
+    otherwise a preliminary 5- or 10-day grade."""
+    rows = []
+    for e in journal.outcomes() + list(journal.open_entries().values()):
+        done = [h for h in learning.HORIZONS if learning.reached(e, h)]
+        if done:
+            rows += learning.graded([e], cfg, max(done))
+    return rows
+
+
+def _horizons(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Profit of the scanner's contracts at each holding period, and how they ended."""
+    entries = [e for e in journal.outcomes() + list(journal.open_entries().values()) if e["source"] == "scanner"]
+    out = []
+    for h in learning.HORIZONS:
+        rows = learning.graded([e for e in entries if learning.reached(e, h)], cfg, h)
+        kinds = [r["exit_kind"] for r in rows]
+        out.append({"horizon": h, **_summary([r["pnl"] for r in rows]),
+                    **{k: (kinds.count(k) / len(kinds) if kinds else None) for k in ("target", "stop", "held")}})
+    return out
+
+
 def build(cfg: dict[str, Any], base_factors: dict[str, float], full_conviction: float) -> dict[str, Any]:
-    rows = learning.graded(journal.outcomes(), cfg)
+    final = learning.graded(journal.outcomes(), cfg)  # 15-day grades: the only ones learning uses
+    rows = _latest_grades(cfg)  # what the page shows, preliminary grades included
     scanner_rows = [r for r in rows if r["source"] == "scanner"]
     earnings_rows = [r for r in rows if r["source"] == "earnings"]
     base_methods = structure.METHOD_WEIGHTS
-    tuning = learning.tune(rows, base_factors, base_methods, cfg, full_conviction)
+    tuning = learning.tune(final, base_factors, base_methods, cfg, full_conviction)
     act_f, act_m = learning.active("factors", base_factors), learning.active("methods", base_methods)
 
     factors = {k: {"base": base_factors[k], "active": act_f[k],
@@ -105,10 +129,11 @@ def build(cfg: dict[str, Any], base_factors: dict[str, float], full_conviction: 
 
     exits = []
     budget = cfg["account_size"] * cfg["risk_per_trade_pct"] / 100
-    raw = [r for r in journal.outcomes() if r["source"] == "scanner" and r["ask"] * 100 <= budget]
+    raw = [r for r in scanner_rows if r["ask"] * 100 <= budget]
     for t in TARGETS:
         for s in STOPS:
-            pnls = [p for p in (learning.profit(r, t, s, cfg["sim_commission"]) for r in raw) if p is not None]
+            pnls = [p for p in (learning.profit(r, t, s, cfg["sim_commission"], r["horizon"]) for r in raw)
+                    if p is not None]
             exits.append({"target": t, "stop": s, **_summary(pnls),
                           "current": abs(t - cfg["sim_target_pct"] / 100) < 1e-9 and abs(s - cfg["sim_stop_pct"] / 100) < 1e-9})
 
@@ -124,7 +149,9 @@ def build(cfg: dict[str, Any], base_factors: dict[str, float], full_conviction: 
     card = {
         "built": datetime.now(data.NEW_YORK).isoformat(timespec="minutes"),
         "collected": {"graded": len(rows), "scanner": len(scanner_rows), "earnings_plays": len(earnings_rows),
+                      "final": sum(1 for r in scanner_rows if r["horizon"] == learning.FINAL),
                       "following": len(journal.open_entries()), "sessions": len(by_day)},
+        "horizons": _horizons(cfg),
         "tuning": tuning, "factors": factors, "methods": methods, "bands": bands,
         "moneyness": {k: _summary(v) for k, v in otm.items()},
         "exits": exits, "picks": picks,

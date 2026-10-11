@@ -251,7 +251,7 @@ def rotation_chart(rot: dict) -> go.Figure:
     return fig
 
 
-def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
+def detail(ticker: str, info: dict, pick: pd.Series | None, where: str = "detail") -> None:
     st.subheader(f"{ticker}  ·  ${info['spot']:,.2f}  ·  {info['bias']} ({info['trend']:+.0f})")
     if pick is not None:
         st.markdown(f"**${pick['strike']:g} {pick['type']} expiring {pick['expiration']}** ({pick['dte']} days)")
@@ -267,11 +267,11 @@ def detail(ticker: str, info: dict, pick: pd.Series | None) -> None:
         if pick["stale"]:
             st.info("No live bid/ask (market closed or no quote). Prices are from the last trade.", icon="ℹ️")
     left, right = st.columns([3, 2])
-    left.plotly_chart(price_chart(info["indicators"], ticker), width="stretch")
+    left.plotly_chart(price_chart(info["indicators"], ticker), width="stretch", key=f"{where}-price-{ticker}")
     if info.get("surface"):
         smile_col, surface_col = left.columns(2)
-        smile_col.plotly_chart(smile_chart(info["surface"]), width="stretch")
-        surface_col.plotly_chart(surface_chart(info["surface"]), width="stretch")
+        smile_col.plotly_chart(smile_chart(info["surface"]), width="stretch", key=f"{where}-smile-{ticker}")
+        surface_col.plotly_chart(surface_chart(info["surface"]), width="stretch", key=f"{where}-surface-{ticker}")
     left.caption(f"RSI {info['rsi']:.0f} · 20-day realised vol {info['hv20']:.0%} · daily range (ATR) {info['atr_pct']:.1%}")
 
     levels = info["levels"]
@@ -403,7 +403,7 @@ def main() -> None:
         if not rot:
             st.info("Sector data was unavailable on this scan.")
         else:
-            st.plotly_chart(rotation_chart(rot), width="stretch")
+            st.plotly_chart(rotation_chart(rot), width="stretch", key="rotation")
             st.caption("Each line is a sector's last 8 weeks against SPY; the large dot is now and the arrow its latest "
                        "direction. Sectors rotate clockwise: leading, weakening, lagging, improving, then leading again.")
             st.dataframe(pd.DataFrame([
@@ -429,7 +429,7 @@ def main() -> None:
             if pick is None:
                 pick = shown.iloc[0]
             st.divider()
-            detail(pick["ticker"], tickers[pick["ticker"]], pick)
+            detail(pick["ticker"], tickers[pick["ticker"]], pick, "pick")
 
     with trends_tab:
         short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "avwap": "AVWAP",
@@ -448,7 +448,7 @@ def main() -> None:
         })
         choice = st.selectbox("Chart a ticker", list(tickers))
         if choice:
-            detail(choice, tickers[choice], None)
+            detail(choice, tickers[choice], None, "chosen")
 
     with help_tab:
         st.markdown(

@@ -7,15 +7,16 @@ Each scan in market hours records:
   - the out-of-the-money plays on the Earnings page, as contracts to follow the same way
   - each ticker's method scores for the day, and each earnings prediction until its report
 
-Each journaled contract is then followed for five trading days: the highest, lowest and last
-bid seen each day. After that it is moved to a monthly outcome file, where the scorecard
-grades it on dollars of profit (see scorecard.py).
+Each journaled contract is then followed for fifteen trading days: the highest, lowest and last
+bid seen each day, and the bid at the first scan where the stock crosses its stop or target
+level. After that it is moved to a monthly outcome file. The scorecard grades it on dollars of
+profit at 5, 10 and 15 days (see scorecard.py); the 15-day grade is the one learning uses.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 import numpy as np
@@ -26,7 +27,8 @@ from .config import HOME
 DIR = HOME / "journal"
 OPEN_FILE = DIR / "open.json"
 EARNINGS_FILE = DIR / "earnings.json"
-HORIZON = 5  # trading days each contract is followed
+HORIZON = 15  # trading days each contract is followed
+OPEN_SETTLED = time(9, 45)  # New York time from which delayed quotes show the live session
 
 
 def _read(path, default):
@@ -63,7 +65,8 @@ def _entry(row, info: dict[str, Any], now: str, source: str) -> dict[str, Any]:
         "factors": {k[2:]: _num(v) for k, v in row.items() if k.startswith("f_")},
         "read": _num(info.get("trend")), "bias": info.get("bias"),
         "methods": {m["key"]: m["score"] for m in info.get("methods", [])},
-        "days": {},
+        "stop_level": _num(row.get("stop_level")), "target_level": _num(row.get("target_price")),
+        "days": {}, "events": {},
     }
 
 
@@ -109,7 +112,9 @@ def record_scan(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, int]:
             entry.update(report_date=outlook["date"], timing=outlook["timing"], lean=outlook["lean"])
             add(leg["symbol"], entry)
 
-    # Follow every open entry: high, low and latest bid for each trading day after entry.
+    # Follow every open entry: high, low and latest bid for each trading day after entry. Quotes
+    # are 15 minutes delayed, so before 9:45 they still show the pre-open book (bids of zero).
+    settled = datetime.now(data.NEW_YORK).time() >= OPEN_SETTLED
     for key, entry in list(tracked.items()):
         day = _trading_days(entry["entry_date"], today)
         expired = date.fromisoformat(entry["expiration"]) < today
@@ -118,16 +123,25 @@ def record_scan(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, int]:
             del tracked[key]
             matured += 1
             continue
-        if day == 0:
+        if day == 0 or not settled:
             continue
         quotes = data.cached_quotes(entry["ticker"])
         if quotes is None or entry["symbol"] not in quotes.index:
             continue
-        bid = float(quotes.at[entry["symbol"], "bid"])
-        if bid < 0:
-            continue
+        bid, ask = float(quotes.at[entry["symbol"], "bid"]), float(quotes.at[entry["symbol"], "ask"])
+        if not 0 < bid < ask:
+            continue  # a zero or one-sided quote is not a price anyone could sell at
         mark = entry["days"].setdefault(str(day), {"hi": bid, "lo": bid, "close": bid})
         mark.update(hi=max(mark["hi"], bid), lo=min(mark["lo"], bid), close=bid)
+        spot = (result["tickers"].get(entry["ticker"]) or {}).get("spot")
+        if spot:  # first scan where the stock crosses the stop or target level, with the bid then
+            up = entry["type"] == "call"
+            for key, kind in (("stop_level", "stop"), ("target_level", "target")):
+                level = entry.get(key)
+                if level is None or kind in entry.setdefault("events", {}):
+                    continue
+                if (spot <= level if up else spot >= level) if kind == "stop" else (spot >= level if up else spot <= level):
+                    entry["events"][kind] = {"day": day, "bid": bid}
         updated += 1
     _write(OPEN_FILE, tracked)
     record_earnings(result)
@@ -166,7 +180,7 @@ def outcomes() -> list[dict[str, Any]]:
     rows = []
     for path in sorted((DIR / "outcomes").glob("*.jsonl")):
         with path.open(encoding="utf-8") as fh:
-            rows += [json.loads(line) for line in fh if line.strip()]
+            rows += [{**json.loads(line), "retired": True} for line in fh if line.strip()]
     return rows
 
 

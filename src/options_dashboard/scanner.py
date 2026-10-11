@@ -41,7 +41,7 @@ COLUMNS = [
     "spread_pct", "delta", "gamma", "theta", "vega", "iv", "iv_hv", "pop", "breakeven",
     "breakeven_move", "expected_move", "theta_pct", "leverage", "openInterest", "volume",
     "spot", "trend", "bias", "stale", "earnings_before_expiry", "contractSymbol", "moneyness",
-    "target_price", "target_label", "target_move",
+    "target_price", "target_label", "target_move", "stop_level", "stop_label", "risk_atr", "reward_risk",
     *(f"pts_{k}" for k in WEIGHTS), *(f"f_{k}" for k in WEIGHTS), "score_control",
 ]
 
@@ -65,6 +65,26 @@ def structural_target(levels: dict[str, Any], spot: float, atr: float, bullish: 
         return None
     _, value, name = min(found)
     return value, name
+
+
+STOP_BUFFER_ATR = 0.25  # the stop sits this far beyond its level, so a touch of the level is not a stop
+
+
+def structural_stop(levels: dict[str, Any], spot: float, atr: float, bullish: bool) -> tuple[float, str] | None:
+    """Where the trade is proven wrong: just beyond the nearest level on the wrong side of the
+    price (support under a call, resistance over a put), with that level's name."""
+    found = []
+    for key, name in TARGET_LEVELS.items():
+        value = levels.get(key)
+        if value is None:
+            continue
+        gap = spot - value if bullish else value - spot
+        if gap > 0:
+            found.append((gap, float(value), name))
+    if not found:
+        return None
+    _, value, name = min(found)
+    return (value - STOP_BUFFER_ATR * atr if bullish else value + STOP_BUFFER_ATR * atr), name
 
 
 def volatility_read(ticker: str, surf: dict, quote: dict[str, Any], report: date | None) -> dict:
@@ -275,6 +295,17 @@ def scan_ticker(ticker: str, cfg: dict[str, Any], rate: float, context: dict[str
         else:
             df["target_price"], df["target_label"], df["target_move"] = np.nan, None, np.nan
             reach = np.full(len(df), 0.5)  # no level to aim at: neither reward nor penalise
+
+        # The ideal entry sits just beyond a level that would prove the trade wrong, with a target
+        # well beyond it: risk in ATRs and reward against risk, both measured on the stock.
+        atr_dollars = snap["atr_pct"] * spot
+        stop = structural_stop(levels, spot, atr_dollars, direction == "bullish")
+        if stop and atr_dollars > 0:
+            risk = abs(spot - stop[0])
+            df["stop_level"], df["stop_label"], df["risk_atr"] = stop[0], stop[1], risk / atr_dollars
+            df["reward_risk"] = abs(target[0] - spot) / risk if target and risk > 0 else np.nan
+        else:
+            df["stop_level"], df["stop_label"], df["risk_atr"], df["reward_risk"] = np.nan, None, np.nan, np.nan
 
         spread = _scale(df["spread_pct"].fillna(cfg["max_spread_pct"] / 2), 0, cfg["max_spread_pct"])
         parts = {

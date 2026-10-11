@@ -153,14 +153,29 @@ def _manage(state: dict[str, Any], now: str, cfg: dict[str, Any]) -> None:
                 _close(state, pos, "Expired", now, cfg)
             elif not live:
                 continue  # never sell on a stale quote
+            elif _through(pos, spot, "stop_spot"):
+                _close(state, pos, f"Stop hit: stock through the {pos['stop_label']}", now, cfg)
             elif pos["last_bid"] <= pos["stop_price"]:
                 _close(state, pos, "Stop hit", now, cfg)
+            elif _through(pos, spot, "target_spot"):
+                _close(state, pos, f"Target hit: stock reached the {pos['target_label']}", now, cfg)
             elif pos["last_bid"] >= pos["target_price"]:
                 _close(state, pos, "Target hit", now, cfg)
             elif dte <= cfg["sim_exit_dte"]:
                 _close(state, pos, "Time limit", now, cfg)
             elif cfg.get("sim_flatten_time") and _past(cfg["sim_flatten_time"]):
                 _close(state, pos, "End of day", now, cfg)  # day trades are never held overnight
+
+
+def _through(pos: dict[str, Any], spot: float, key: str) -> bool:
+    """Whether the stock has crossed the position's stop ("stop_spot") or target ("target_spot") level."""
+    level = pos.get(key)
+    if level is None:
+        return False
+    up = pos["type"] == "call"
+    if key == "stop_spot":
+        return spot <= level if up else spot >= level
+    return spot >= level if up else spot <= level
 
 
 def _past(hhmm: str) -> bool:
@@ -264,6 +279,13 @@ def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str
         return "spread too wide"
     if not cfg["sim_min_dte"] <= row["dte"] <= cfg["sim_max_dte"]:
         return "outside its expiry range"
+    if cfg.get("sim_stop_mode", "structure") == "structure":
+        if pd.isna(row.get("stop_level")):
+            return "no level to set a stop behind"
+        if row["risk_atr"] > cfg["sim_max_risk_atr"]:
+            return f"too far from its stop ({row['risk_atr']:.1f} ATR)"
+        if pd.isna(row.get("reward_risk")) or row["reward_risk"] < cfg["sim_min_reward_risk"]:
+            return f"target under {cfg['sim_min_reward_risk']:g}x the risk"
     if cfg.get("sim_min_moneyness") is not None and row["moneyness"] < cfg["sim_min_moneyness"]:
         return "not far enough out of the money"
     if cfg.get("sim_require_short_gamma"):
@@ -391,6 +413,10 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
             "delta": float(row["delta"]), "theta": float(row["theta"]), "iv": float(row["iv"]),
             "earnings_before_expiry": bool(row["earnings_before_expiry"]),
         }
+        if cfg.get("sim_stop_mode", "structure") == "structure":
+            pos.update(stop_spot=round(float(row["stop_level"]), 2), stop_label=row["stop_label"],
+                       target_spot=round(float(row["target_price"]), 2), target_label=row["target_label"],
+                       risk_atr=round(float(row["risk_atr"]), 2), reward_risk=round(float(row["reward_risk"]), 1))
         state["cash"] -= cost
         state["positions"].append(pos)
         held.add(ticker)

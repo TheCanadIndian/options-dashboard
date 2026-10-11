@@ -1,18 +1,20 @@
 """Profit grading and self-adjusting weights.
 
 Every journaled contract is graded on dollars of profit for one contract, traded the way the
-portfolio trades: bought at the ask, sold at the bid when it reaches the target or the stop,
-otherwise at the last bid on the fifth trading day, with commission both ways. Earnings plays
-are held through the report and sold at the close of the reaction day.
+portfolio trades: bought at the ask, sold at the bid when it reaches the target or the stop
+(on the option's price, or the stock crossing its structural stop or target level), otherwise
+at the last bid on the horizon's final day, with commission both ways. Grades are taken at 5, 10
+and 15 trading days; learning uses the 15-day grade. Earnings plays are held through the report
+and sold at the close of the reaction day.
 
-Once enough contracts have matured (MIN_DAYS sessions and MIN_RECORDS contracts) the factor
-and method weights are re-tuned once a week:
+Once enough contracts have matured (MIN_DAYS sessions, MIN_RECORDS contracts, and at least one
+week SPY rose and one it fell) the factor and method weights are re-tuned once a week:
 
-  1. On everything except the latest five sessions, each factor and method gets a profit edge:
+  1. On everything except the latest HOLDOUT_DAYS sessions, each factor and method gets a profit edge:
      per day, the average profit of the contracts it rated in the top fifth minus those in the
      bottom fifth, then a t-statistic across days.
   2. Weights with a clear edge (|t| >= 1) move by at most 20% in its direction.
-  3. The proposal is replayed on the latest five sessions, which it was not fitted to: each day
+  3. The proposal is replayed on the latest HOLDOUT_DAYS sessions, which it was not fitted to: each day
      it picks the top five contracts (one per stock), as the portfolio would. It is adopted only
      if those picks made more money than the picks of the weights in use.
   4. The original weights stay as a control. If the weights in use make less than the control's
@@ -27,13 +29,18 @@ from datetime import date
 from typing import Any
 
 import numpy as np
+import pandas as pd
+
+from . import data
 
 from .config import HOME
 
 FILE = HOME / "journal" / "learned.json"
-MIN_DAYS = 20  # sessions of matured contracts before anything is tuned
+MIN_DAYS = 40  # sessions of matured contracts before anything is tuned
 MIN_RECORDS = 1000
-HOLDOUT_DAYS = 5
+HOLDOUT_DAYS = 10
+HORIZONS = (5, 10, 15)  # trading days at which each contract is graded
+FINAL = 15  # the grade learning uses
 MAX_STEP = 0.20  # largest change to one weight in one week
 PICKS_PER_DAY = 5
 REVERT_AFTER = 2  # weekly checks behind the control before reverting
@@ -63,30 +70,57 @@ def log() -> list[dict[str, Any]]:
 
 # ---------------------------------------------------------------- profit
 
-def profit(entry: dict[str, Any], target: float, stop: float, commission: float) -> float | None:
-    """Dollars made on one contract, or None when there are no marks to judge it by."""
+def trade(entry: dict[str, Any], target: float, stop: float, commission: float,
+          horizon: int = FINAL) -> tuple[float, str] | None:
+    """Dollars made on one contract held up to `horizon` trading days, and how it ended ("target",
+    "stop", "held" to the horizon, or "report" for earnings plays); None with no marks to judge by."""
     ask = entry["ask"]
-    days = {int(k): v for k, v in entry["days"].items()}
+    days = {int(k): v for k, v in entry["days"].items() if int(k) <= horizon}
     if not days or ask <= 0:
         return None
+    kind = "held"
     if entry.get("source") == "earnings":
-        exit_ = _earnings_exit(entry, days)
+        exit_, kind = _earnings_exit(entry, days), "report"
     else:
         exit_ = None
+        events = entry.get("events") or {}
         up, down = ask * (1 + target), ask * (1 - stop)
         for d in sorted(days):
             m = days[d]
-            if m["lo"] <= down:  # checked first: when both happen in a day the order is unknown, assume the worse
-                exit_ = m["hi"] if m["hi"] < down else down  # gapped through the stop: take the best bid seen
+            # Stops are checked first: when a stop and a target both happen in a day the order is
+            # unknown, so assume the worse. Of two stops the same day, take the lower bid.
+            stops = [m["hi"] if m["hi"] < down else down] if m["lo"] <= down else []  # gapped through: best bid seen
+            if events.get("stop", {}).get("day") == d:
+                stops.append(events["stop"]["bid"])
+            if stops:
+                exit_, kind = min(stops), "stop"
                 break
-            if m["hi"] >= up:
-                exit_ = m["lo"] if m["lo"] > up else up
+            wins = [m["lo"] if m["lo"] > up else up] if m["hi"] >= up else []
+            if events.get("target", {}).get("day") == d:
+                wins.append(events["target"]["bid"])
+            if wins:
+                exit_, kind = min(wins), "target"
                 break
         if exit_ is None:
             exit_ = days[max(days)]["close"]
     if exit_ is None:
         return None
-    return exit_ * 100 - ask * 100 - 2 * commission
+    return exit_ * 100 - ask * 100 - 2 * commission, kind
+
+
+def profit(entry: dict[str, Any], target: float, stop: float, commission: float,
+           horizon: int = FINAL) -> float | None:
+    """Dollars made on one contract, or None when there are no marks to judge it by."""
+    done = trade(entry, target, stop, commission, horizon)
+    return None if done is None else done[0]
+
+
+def reached(entry: dict[str, Any], horizon: int, today: date | None = None) -> bool:
+    """Whether a contract has been followed long enough to grade at `horizon` days. Retired
+    entries were followed to the end (or expired), so they always count."""
+    if entry.get("retired"):
+        return True
+    return int(np.busday_count(date.fromisoformat(entry["entry_date"]), today or date.today())) > horizon
 
 
 def _earnings_exit(entry: dict[str, Any], days: dict[int, dict]) -> float | None:
@@ -100,7 +134,7 @@ def _earnings_exit(entry: dict[str, Any], days: dict[int, dict]) -> float | None
     return days[min(later)]["close"] if later else None
 
 
-def graded(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> list[dict[str, Any]]:
+def graded(rows: list[dict[str, Any]], cfg: dict[str, Any], horizon: int = FINAL) -> list[dict[str, Any]]:
     """Profit for every journaled contract the portfolio could have bought.
 
     The scanner flags contracts at any price, but dollar profit on a $2,000 contract would swamp
@@ -112,9 +146,9 @@ def graded(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> list[dict[str, An
     for r in rows:
         if r["ask"] * 100 > budget:
             continue
-        p = profit(r, cfg["sim_target_pct"] / 100, cfg["sim_stop_pct"] / 100, cfg["sim_commission"])
-        if p is not None:
-            out.append({**r, "pnl": p})
+        done = trade(r, cfg["sim_target_pct"] / 100, cfg["sim_stop_pct"] / 100, cfg["sim_commission"], horizon)
+        if done is not None:
+            out.append({**r, "pnl": done[0], "exit_kind": done[1], "horizon": horizon})
     return out
 
 
@@ -192,6 +226,24 @@ def _propose(weights: dict[str, float], edges: dict[str, dict], floor: float, to
     return {k: round(v * scale, 4) for k, v in new.items()}
 
 
+def _market_weeks(days: list[str]) -> tuple[int, int]:
+    """Weeks SPY rose and fell (Friday to Friday) across the sessions graded so far, so weights are
+    never tuned on one kind of market only."""
+    if not days:
+        return 0, 0
+    try:
+        close = data.history("SPY")["Close"]
+    except Exception:
+        return 0, 0
+    close.index = pd.to_datetime(close.index)
+    if close.index.tz is not None:
+        close.index = close.index.tz_convert(None)
+    weekly = close[(close.index >= pd.Timestamp(days[0]) - pd.Timedelta(days=7))
+                   & (close.index <= pd.Timestamp(days[-1]) + pd.Timedelta(days=7))].resample("W-FRI").last().dropna()
+    change = weekly.pct_change().dropna()
+    return int((change > 0).sum()), int((change < 0).sum())
+
+
 def tune(rows: list[dict[str, Any]], base_factors: dict[str, float], base_methods: dict[str, float],
          cfg: dict[str, Any], full_conviction: float) -> dict[str, Any]:
     """Weekly check and, when unlocked, adjustment. Returns what happened, for the scorecard."""
@@ -199,9 +251,13 @@ def tune(rows: list[dict[str, Any]], base_factors: dict[str, float], base_method
     scanner_rows = [r for r in rows if r.get("source") == "scanner" and r.get("factors") and r.get("methods")]
     days = sorted({r["entry_date"] for r in scanner_rows})
     status = {"days": len(days), "records": len(scanner_rows), "unlocked": False, "message": None}
-    if len(days) < MIN_DAYS or len(scanner_rows) < MIN_RECORDS:
-        status["message"] = (f"Learning unlocks at {MIN_DAYS} sessions and {MIN_RECORDS} graded contracts "
-                             f"({len(days)} and {len(scanner_rows)} so far); until then the original weights are used.")
+    ups, downs = _market_weeks(days)
+    status.update(up_weeks=ups, down_weeks=downs)
+    if len(days) < MIN_DAYS or len(scanner_rows) < MIN_RECORDS or not (ups and downs):
+        status["message"] = (f"Learning unlocks at {MIN_DAYS} sessions, {MIN_RECORDS} contracts graded at "
+                             f"{FINAL} days, and at least one week SPY rose and one it fell ({len(days)} sessions, "
+                             f"{len(scanner_rows)} contracts, {ups} up and {downs} down weeks so far); until then "
+                             f"the original weights are used.")
         return status
     status["unlocked"] = True
     week = date.today().strftime("%G-W%V")

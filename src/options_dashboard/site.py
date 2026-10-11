@@ -293,11 +293,24 @@ def _reasoning(pos: dict[str, Any], opened: bool) -> str:
         f'so the scanner looked for a {side}</h4>{read}'
         f'<h4>Why this contract</h4><ul>{notes}</ul>'
         f'<h4>Score {pos["score"]:.0f} out of 100</h4><div class="pts">{rows}</div>'
-        f'<h4>Exit plan set at entry</h4><ul>'
-        f'<li>Take profit at {_money(pos["target_price"])} per share or higher</li>'
-        f'<li>Stop loss at {_money(pos["stop_price"])} or lower</li>'
-        f'<li>Sell on {_day(pos["time_exit"])} if neither has been hit</li></ul></details>'
+        f'<h4>Exit plan set at entry</h4><ul>{_exit_plan(pos)}</ul></details>'
     )
+
+
+def _exit_plan(pos: dict[str, Any]) -> str:
+    under, over = ("below", "above") if pos["type"] == "call" else ("above", "below")
+    items = []
+    if pos.get("stop_spot") is not None:
+        items.append(f"Stop: sell if the stock trades {under} {_money(pos['stop_spot'])}, just past the "
+                     f"{escape(pos['stop_label'])} ({pos['risk_atr']:.1f} ATR from entry)")
+        items.append(f"Take profit if the stock reaches {_money(pos['target_spot'])}, the {escape(pos['target_label'])} "
+                     f"({pos['reward_risk']:.1f}× the risk), or the option bid reaches {_money(pos['target_price'])}")
+        items.append(f"Backstop: sell if the option bid falls to {_money(pos['stop_price'])}, for gaps")
+    else:
+        items.append(f"Take profit at {_money(pos['target_price'])} per share or higher")
+        items.append(f"Stop loss at {_money(pos['stop_price'])} or lower")
+    items.append(f"Sell on {_day(pos['time_exit'])} if none of these has happened")
+    return "".join(f"<li>{i}</li>" for i in items)
 
 
 def _review(pos: dict[str, Any]) -> str:
@@ -400,8 +413,15 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
         f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
         f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
         f"{cfg['sim_max_positions']} positions, one per stock.",
-        f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
-        f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry.",
+        (f"Only buys near a level that would prove the trade wrong: the stop sits just beyond the nearest "
+         f"support under a call (or resistance over a put), at most {cfg['sim_max_risk_atr']:g} ATR from the price, "
+         f"and the next level in the trade's direction must be at least {cfg['sim_min_reward_risk']:g}× that far. "
+         f"Sells when the stock crosses the stop or reaches the target level, when the bid is "
+         f"{cfg['sim_target_pct']:g}% above the purchase price, at a {cfg['sim_stop_pct']:g}% backstop on the "
+         f"option for gaps, or {cfg['sim_exit_dte']} days before expiry."
+         if cfg.get("sim_stop_mode", "structure") == "structure" else
+         f"Sells when the bid is {cfg['sim_target_pct']:g}% above the purchase price (target), "
+         f"{cfg['sim_stop_pct']:g}% below it (stop), or {cfg['sim_exit_dte']} days before expiry."),
         f"Only trades with the broad market: the average read of {' and '.join(cfg['sim_regime_tickers'])}. When it "
         f"is beyond ±{cfg['sim_regime_threshold']}, a trade against it needs a read of at least "
         f"±{cfg['sim_counter_trend_min']} on its own stock. At most {cfg['sim_max_same_direction']} positions bet the same way.",
@@ -752,12 +772,14 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
             + _cell(r["iv"], f"{r['iv']:.0%}")
             + _cell(r["iv_hv"], ratio)
             + _cell(r["breakeven_move"], f"{r['breakeven_move']:.1%}")
+            + _cell(r["reward_risk"] if r["reward_risk"] == r["reward_risk"] else -1,
+                    f"{r['reward_risk']:.1f}× · {r['risk_atr']:.1f} ATR" if r["reward_risk"] == r["reward_risk"] else "–")
             + _cell(r["pop"], f"{r['pop']:.0%}")
             + _cell(r["spread_pct"], spread)
             + _cell(r["openInterest"], f"{int(r['openInterest']):,}") + "</tr>"
         )
     heads = ["Score", "Ticker", "Type", "Strike", "OTM", "Expiry", "Cost", "Status", "Days", "Delta", "Theta/day", "IV",
-             "IV/HV", "Breakeven move", "Chance of profit", "Spread", "Open interest"]
+             "IV/HV", "Breakeven move", "Reward/risk · stop", "Chance of profit", "Spread", "Open interest"]
     options = "".join(f"<option>{escape(t)}</option>" for t in sorted(contracts["ticker"].unique()))
     table = (
         '<div class="filters"><label>Ticker <select id="f-ticker"><option value="">All</option>'
@@ -1015,14 +1037,15 @@ def _summary_rows(items: list[tuple[str, dict[str, Any]]]) -> str:
 def render_learning(card: dict[str, Any], cfg: dict[str, Any]) -> str:
     if not card:
         body = ('<p class="muted">The journal starts filling at the next scan in market hours. The first contracts '
-                'are graded five trading days after they are flagged.</p>')
+                'get early grades 5 and 10 trading days after they are flagged, and final grades at 15.</p>')
         return _page("Learning", "What has made money, and how the scanner adjusts to it.", body, TABLE_JS)
     c, tuning = card["collected"], card["tuning"]
     tiles = [
-        ("Contracts graded", f"{c['scanner']:,}", f"over {c['sessions']} sessions"),
-        ("Being followed", f"{c['following']:,}", "graded after 5 trading days"),
+        ("Contracts graded", f"{c['scanner']:,}", f"over {c['sessions']} sessions, "
+                                                  f"{c.get('final', 0):,} final (15 days)"),
+        ("Being followed", f"{c['following']:,}", "early grades at 5 and 10 days, final at 15"),
         ("Earnings plays graded", f"{c['earnings_plays']:,}", "held through the report"),
-        ("Learning", "On" if tuning["unlocked"] else "Locked", f"{tuning['days']} of 20 sessions needed"
+        ("Learning", "On" if tuning["unlocked"] else "Locked", f"{tuning['days']} of 40 sessions needed"
          if not tuning["unlocked"] else "weekly, profit-tested"),
     ]
     tile_html = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
@@ -1052,13 +1075,26 @@ def render_learning(card: dict[str, Any], cfg: dict[str, Any]) -> str:
     log_rows = "".join(f'<tr><td>{_day(e["date"])}</td><td>{escape(e["change"])}</td><td>{escape(e["reason"])}</td></tr>'
                        for e in reversed(card["log"]))
 
+    def share(v):
+        return _pct(v, 0) if v is not None else "–"
+
+    horizon_rows = "".join(
+        f'<tr><td>{h["horizon"]} trading days</td><td class="num">{h["trades"]}</td><td class="num">{_dollars(h["avg"])}</td>'
+        f'<td class="num">{_pct(h["win_rate"], 0)}</td><td class="num">{share(h["target"])}</td>'
+        f'<td class="num">{share(h["stop"])}</td><td class="num">{share(h["held"])}</td></tr>'
+        for h in card.get("horizons", []))
     body = f"""<div class="tiles">{tile_html}</div>
 <p class="notice">{escape(tuning["message"] or "")}</p>
+<h2>By holding period</h2><div class="panel scroll"><table><thead><tr><th>Held up to</th><th>Contracts</th><th>Average profit</th>
+<th>Win rate</th><th>Hit target</th><th>Stopped</th><th>Still open</th></tr></thead><tbody>{horizon_rows or '<tr><td colspan="7" class="muted">Nothing old enough to grade yet.</td></tr>'}</tbody></table></div>
+<p class="muted small">Each contract graded as if held up to 5, 10 and 15 trading days. "Still open" ones are marked at the last
+day's bid; when most end that way, the holding period is too short to judge them. The tables below use each contract's
+longest completed grade (5 and 10 days are preliminary); learning only uses the 15-day grade.</p>
 <h2>Learned picks against the original weights</h2><div class="panel"><p>{escape(picks_text)}</p></div>
 <h2>Factors</h2><div class="panel scroll"><table><thead>{heads}</thead><tbody>{_edge_rows(card["factors"], FACTOR_NAMES, False)}</tbody></table></div>
 <p class="muted small">Profit edge: each day, the average profit of the contracts this factor rated in its top fifth minus its
 bottom fifth, averaged over days. t above 2 or below -2 is unlikely to be chance. Profit is for one contract bought at the ask
-and sold at the bid at the target, the stop or after five trading days, less commission.</p>
+and sold at the bid at the target, the stop or the end of its holding period, less commission.</p>
 <h2>Market read methods</h2><div class="panel scroll"><table><thead>{heads}</thead><tbody>{_edge_rows(card["methods"], structure.METHOD_NAMES, True)}</tbody></table></div>
 <h2>Profit by score</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows([(b["band"], b) for b in card["bands"]])}</tbody></table></div>
 <h2>Profit by moneyness</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows(sorted(card["moneyness"].items()))}</tbody></table></div>
@@ -1070,9 +1106,9 @@ Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): {"n/a" 
 {f'<div class="scroll"><table><thead><tr><th>Date</th><th>Ticker</th><th>Lean</th><th>Beat chance</th><th>Result</th><th>Reaction</th><th>Implied</th></tr></thead><tbody>{earn_rows}</tbody></table></div>' if earn_rows else ''}</div>
 <h2>Change log</h2><div class="panel scroll"><table><thead><tr><th>Date</th><th>Change</th><th>Why</th></tr></thead><tbody>{log_rows or '<tr><td colspan="3" class="muted">No weekly checks yet.</td></tr>'}</tbody></table></div>
 <h2>How learning works</h2><div class="panel"><ul>
-<li>Every flagged contract is journaled and followed for five trading days, then graded on dollars of profit as the portfolio would have traded it.</li>
-<li>Learning stays locked until 20 sessions and 1,000 graded contracts exist. Then, once a week, signals with a clear profit edge get up to 20% more weight and those that lose money up to 20% less.</li>
-<li>A change is adopted only if, on the latest five sessions (data it was not fitted to), its daily top-five picks made more money than the weights in use.</li>
+<li>Every flagged contract is journaled and followed for fifteen trading days, and graded on dollars of profit as the portfolio would have traded it, at 5, 10 and 15 days. Stops and targets count both on the option&#39;s price and on the stock crossing its structural levels.</li>
+<li>Learning stays locked until 40 sessions and 1,000 contracts have final 15-day grades, covering at least one week SPY rose and one it fell. Then, once a week, signals with a clear profit edge get up to 20% more weight and those that lose money up to 20% less.</li>
+<li>A change is adopted only if, on the latest ten sessions (data it was not fitted to), its daily top-five picks made more money than the weights in use.</li>
 <li>The original weights run alongside as a control. If the learned weights make less for two weekly checks running, they revert.</li>
 <li>Overlapping contracts on the same stock and day are not independent, so sample sizes overstate certainty; the minimums and small steps guard against learning noise.</li></ul></div>"""
     sub = f"What has made money, graded in dollars per contract, and how the scanner adjusts. Updated {escape(card['built'].replace('T', ' '))} ET."

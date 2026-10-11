@@ -52,7 +52,13 @@ DEFAULTS: dict[str, Any] = {
     # Simulated portfolio (starts with account_size in cash)
     "sim_min_score": 70,  # buy picks at or above this score
     "sim_target_pct": 50.0,  # sell when the bid is this far above the entry price
-    "sim_stop_pct": 40.0,  # sell when the bid is this far below the entry price
+    "sim_stop_pct": 40.0,  # sell when the bid is this far below the entry price (a backstop under structure stops)
+    # "structure": the stop is the stock crossing just beyond the nearest level that proves the trade
+    # wrong, and buys need that stop close (sim_max_risk_atr) with a target well beyond it
+    # (sim_min_reward_risk). "premium": the stop is only sim_stop_pct on the option's bid.
+    "sim_stop_mode": "structure",
+    "sim_max_risk_atr": 1.0,
+    "sim_min_reward_risk": 2.0,
     "sim_exit_dte": 7,  # sell with this many days left, before time decay accelerates
     # New York times to re-check every open position against the current read: after the open
     # (spreads are widest in the first 15 minutes) and before the close
@@ -107,6 +113,9 @@ DEFAULTS: dict[str, Any] = {
          "rules": {"sim_min_moneyness": 0.02}},
         {"id": "no_regime", "group": "rules", "name": "No market filter", "summary": "Ignores market direction and regime limits",
          "rules": {"sim_use_regime": False}},
+        {"id": "pct_stops", "group": "rules", "name": "Percent stops (control)",
+         "summary": "The old exits: -40% on the option, with no rule about distance to a stop level",
+         "rules": {"sim_stop_mode": "premium"}},
         {"id": "skip_weak_sectors", "group": "rules", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
          "rules": {"sim_skip_avoided_sectors": True}},
         {"id": "weeklies", "group": "short", "name": "Weeklies",
