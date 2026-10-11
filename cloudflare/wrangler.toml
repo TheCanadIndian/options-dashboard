@@ -1,0 +1,15 @@
+name = "options-scan-trigger"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# UTC; covers 9:30-16:00 New York in both daylight and standard time. The Worker drops the
+# firings outside market hours.
+[triggers]
+crons = ["*/15 13-21 * * 1-5"]
+
+[vars]
+REPO = "TheCanadIndian/options-dashboard"
+
+[[r2_buckets]]
+binding = "STATE"
+bucket_name = "options-dashboard-state"

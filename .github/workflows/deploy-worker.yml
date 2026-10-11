@@ -1,0 +1,26 @@
+name: Deploy Cloudflare Worker
+
+# Creates the R2 bucket (first time only) and deploys cloudflare/worker.js with its secrets.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["cloudflare/**"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        env:
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare
+          preCommands: npx wrangler r2 bucket create options-dashboard-state || true
+          secrets: |
+            DISPATCH_TOKEN
+            STATE_TOKEN

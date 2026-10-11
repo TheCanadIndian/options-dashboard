@@ -1454,4 +1454,7 @@ def publish() -> str | None:
     if commit.returncode != 0:
         return f"commit failed: {commit.stderr.strip() or commit.stdout.strip()}"
     push = _git("push")
+    if push.returncode != 0:  # someone else pushed (code changes, or the PC): replay on top and retry
+        _git("pull", "--rebase", "--autostash")
+        push = _git("push")
     return None if push.returncode == 0 else f"push failed: {push.stderr.strip()}"

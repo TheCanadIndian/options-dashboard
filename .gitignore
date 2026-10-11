@@ -6,3 +6,5 @@ paper/
 config.json
 # local learning data (the site shows the scorecard)
 journal/
+# address and key for the cloud copy of the state (see cloudstate.py)
+.cloud.json

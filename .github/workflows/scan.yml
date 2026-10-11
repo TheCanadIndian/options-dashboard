@@ -1,0 +1,45 @@
+name: Scan
+
+# Started every 15 minutes in market hours by the Cloudflare Worker in cloudflare/. Run it by
+# hand with "force" to test outside market hours (no trades or journal entries are made then).
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Scan even when the market is closed"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # the scan commits the site in docs/
+
+concurrency:
+  group: scan  # never two scans at once: they would race on the same state
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TZ: America/Toronto  # the scanner's local times are Eastern, as on the PC
+      STATE_URL: ${{ vars.STATE_URL }}
+      STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Pull state
+        id: pull
+        run: uv run python -m options_dashboard.cloudstate pull
+      - name: Scan
+        run: |
+          git config user.name "options-scanner"
+          git config user.email "options-scanner@users.noreply.github.com"
+          uv run python -m options_dashboard.cli ${{ inputs.force && '--no-alert' || '--market-hours' }}
+      - name: Push state
+        if: always() && steps.pull.outcome == 'success'
+        run: uv run python -m options_dashboard.cloudstate push
