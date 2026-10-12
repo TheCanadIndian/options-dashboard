@@ -1,6 +1,6 @@
 @echo off
-rem Opens the dashboard. Scanning, alerts and the paper test run from the
-rem "Options Dashboard Scanner" scheduled task, so no second window is needed.
+rem Opens the dashboard. Scanning, alerts and the simulated accounts run in the
+rem cloud (cloudflare/ and .github/workflows/scan.yml), so the PC can be off.
 cd /d "%~dp0"
 set UV_LINK_MODE=copy
 rem The scanner runs in the cloud: fetch its latest state first.
