@@ -103,6 +103,16 @@ cursor:pointer;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 .rg-toggle input:checked+label{background:var(--amber);border-color:var(--amber);color:#000;font-weight:600}
 .rg-toggle input:focus-visible+label{outline:2px solid var(--amber2);outline-offset:2px}
 .rg:has(.rg-toggle) .rg-pane{display:none}
+.q-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;font-size:12px}
+.q-chip{border:1px solid;border-left-width:3px;padding:5px 9px;background:#0d0d0c;color:var(--ink);font:inherit;
+font-size:12px;cursor:pointer;text-align:left;min-height:32px}.q-chip:hover{background:#17130a}
+.rg-filter{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+.rg-filter button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border);
+padding:4px 8px;min-height:30px;cursor:pointer;letter-spacing:.04em}
+.rg-filter button:hover{border-color:var(--amber)}
+.rg-filter button i{display:inline-block;width:9px;height:9px;margin-right:6px}
+.rg-filter button[aria-pressed=false]{opacity:.38;text-decoration:line-through}
+.rg-filter button[data-all]{color:var(--amber2)}
 .rg:has(#rg-sec:checked) .rg-sec,.rg:has(#rg-mag7:checked) .rg-mag7{display:block}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
 .grid2>section>h2:first-child{margin-top:22px}
@@ -114,8 +124,8 @@ cursor:pointer;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 main{padding:8px 10px 28px}nav a{padding:8px 9px}}
 </style></head>
 <body>
-<div class="topbar"><span class="brand">OPTIONS TERMINAL</span><span class="clock">LAST SCAN <b>10/12 15:51</b> ET · 15 MIN DELAY</span></div>
-<div class="tape" aria-label="Market quotes"><div class="roll"><span class="q"><span class="sym">VIX</span>15.31 <span class="up">▲+3.17%</span></span><span class="q"><span class="sym">SPY</span>777.36 <span class="down">▼-0.16%</span></span><span class="q"><span class="sym">QQQ</span>745.54 <span class="down">▼-0.76%</span></span><span class="q"><span class="sym">IWM</span>277.87 <span class="down">▼-0.38%</span></span><span class="q"><span class="sym">DIA</span>517.49 <span class="up">▲+0.27%</span></span><span class="q"><span class="sym">TLT</span>78.00 <span class="up">▲+0.03%</span></span><span class="q"><span class="sym">GLD</span>381.99 <span class="down">▼-0.67%</span></span><span class="q"><span class="sym">HYG</span>77.27 <span class="up">▲+0.05%</span></span><span class="q"><span class="sym">IBIT</span>46.75 <span class="up">▲+0.43%</span></span><span class="q"><span class="sym">XLF</span>55.00 <span class="up">▲+0.49%</span></span><span class="q"><span class="sym">XLE</span>65.94 <span class="up">▲+1.31%</span></span><span class="q"><span class="sym">VIX</span>15.31 <span class="up">▲+3.17%</span></span><span class="q"><span class="sym">SPY</span>777.36 <span class="down">▼-0.16%</span></span><span class="q"><span class="sym">QQQ</span>745.54 <span class="down">▼-0.76%</span></span><span class="q"><span class="sym">IWM</span>277.87 <span class="down">▼-0.38%</span></span><span class="q"><span class="sym">DIA</span>517.49 <span class="up">▲+0.27%</span></span><span class="q"><span class="sym">TLT</span>78.00 <span class="up">▲+0.03%</span></span><span class="q"><span class="sym">GLD</span>381.99 <span class="down">▼-0.67%</span></span><span class="q"><span class="sym">HYG</span>77.27 <span class="up">▲+0.05%</span></span><span class="q"><span class="sym">IBIT</span>46.75 <span class="up">▲+0.43%</span></span><span class="q"><span class="sym">XLF</span>55.00 <span class="up">▲+0.49%</span></span><span class="q"><span class="sym">XLE</span>65.94 <span class="up">▲+1.31%</span></span></div></div>
+<div class="topbar"><span class="brand">OPTIONS TERMINAL</span><span class="clock">LAST SCAN <b>10/13 09:39</b> ET · 15 MIN DELAY</span></div>
+<div class="tape" aria-label="Market quotes"><div class="roll"><span class="q"><span class="sym">VIX</span>15.33 <span class="up">▲+0.79%</span></span><span class="q"><span class="sym">SPY</span>777.22 <span class="down">▼-0.11%</span></span><span class="q"><span class="sym">QQQ</span>740.29 <span class="down">▼-0.77%</span></span><span class="q"><span class="sym">IWM</span>277.96 <span class="up">▲+0.02%</span></span><span class="q"><span class="sym">DIA</span>522.24 <span class="up">▲+0.84%</span></span><span class="q"><span class="sym">TLT</span>78.42 <span class="up">▲+0.47%</span></span><span class="q"><span class="sym">GLD</span>383.04 <span class="up">▲+0.23%</span></span><span class="q"><span class="sym">HYG</span>77.25 <span class="down">▼-0.05%</span></span><span class="q"><span class="sym">IBIT</span>47.10 <span class="up">▲+0.51%</span></span><span class="q"><span class="sym">XLF</span>55.43 <span class="up">▲+0.69%</span></span><span class="q"><span class="sym">XLE</span>66.55 <span class="up">▲+0.82%</span></span><span class="q"><span class="sym">VIX</span>15.33 <span class="up">▲+0.79%</span></span><span class="q"><span class="sym">SPY</span>777.22 <span class="down">▼-0.11%</span></span><span class="q"><span class="sym">QQQ</span>740.29 <span class="down">▼-0.77%</span></span><span class="q"><span class="sym">IWM</span>277.96 <span class="up">▲+0.02%</span></span><span class="q"><span class="sym">DIA</span>522.24 <span class="up">▲+0.84%</span></span><span class="q"><span class="sym">TLT</span>78.42 <span class="up">▲+0.47%</span></span><span class="q"><span class="sym">GLD</span>383.04 <span class="up">▲+0.23%</span></span><span class="q"><span class="sym">HYG</span>77.25 <span class="down">▼-0.05%</span></span><span class="q"><span class="sym">IBIT</span>47.10 <span class="up">▲+0.51%</span></span><span class="q"><span class="sym">XLF</span>55.43 <span class="up">▲+0.69%</span></span><span class="q"><span class="sym">XLE</span>66.55 <span class="up">▲+0.82%</span></span></div></div>
 <main>
 <nav aria-label="Pages"><a href="index.html"><b>1</b>HOME</a><a href="portfolio.html"><b>2</b>PORT</a><a href="strategies.html"><b>3</b>STRAT</a><a href="scanner.html"><b>4</b>SCAN</a><a href="earnings.html"><b>5</b>EARN</a><a href="learning.html" aria-current="page"><b>6</b>LEARN</a></nav>
 <h1>What's Working</h1>
@@ -148,7 +158,7 @@ Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): 0.244. 
 <li>A change is adopted only if, on the latest ten sessions (data it was not fitted to), its daily top-five picks made more money than the weights in use.</li>
 <li>The original weights run alongside as a control. If the learned weights make less for two weekly checks running, they revert.</li>
 <li>Overlapping contracts on the same stock and day are not independent, so sample sizes overstate certainty; the minimums and small steps guard against learning noise.</li></ul></div>
-<div class="statusbar"><span><b>REGIME</b>RISK-ON FADING +2</span><span><b>MKT DIR</b>NEUTRAL +2</span><span><b>CORE ACCT</b>$866.15 <span class="down">-13.4%</span></span><span><b>OPEN</b>5</span><span><b>FLAGGED</b>1228</span></div>
+<div class="statusbar"><span><b>REGIME</b>RISK-OFF DEEPENING -2</span><span><b>MKT DIR</b>NEUTRAL +9</span><span><b>CORE ACCT</b>$854.15 <span class="down">-14.6%</span></span><span><b>OPEN</b>5</span><span><b>FLAGGED</b>812</span></div>
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
 </main><script>
 document.querySelectorAll('table.sortable').forEach(function(table){
@@ -165,4 +175,15 @@ function apply(){var shown=0;rows.forEach(function(r){var ok=(!t.value||r.datase
 (!b.checked||r.dataset.b==='1');r.style.display=ok?'':'none';shown+=ok});
 n.textContent='Showing '+shown+' of '+rows.length}
 t.addEventListener('change',apply);b.addEventListener('change',apply);apply()})();
+
+document.querySelectorAll('.rg-pane').forEach(function(p){
+var on={};p.querySelectorAll('button.rg-s').forEach(function(b){on[b.dataset.s]=true});
+function draw(){p.querySelectorAll('[data-s]').forEach(function(e){
+if(e.tagName==='BUTTON')e.setAttribute('aria-pressed',on[e.dataset.s]?'true':'false');
+else e.style.display=on[e.dataset.s]?'':'none'})}
+p.addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b||!p.contains(b))return;
+if(b.dataset.s!==undefined){on[b.dataset.s]=!on[b.dataset.s]}
+else if(b.dataset.q!==undefined){var keep=b.dataset.q.split(' ');Object.keys(on).forEach(function(k){on[k]=keep.indexOf(k)>=0})}
+else if(b.dataset.all!==undefined){Object.keys(on).forEach(function(k){on[k]=b.dataset.all==='1'})}
+draw()});draw()});
 </script></body></html>
