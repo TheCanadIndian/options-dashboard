@@ -120,6 +120,16 @@ cursor:pointer;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 .rg-toggle input:checked+label{background:var(--amber);border-color:var(--amber);color:#000;font-weight:600}
 .rg-toggle input:focus-visible+label{outline:2px solid var(--amber2);outline-offset:2px}
 .rg:has(.rg-toggle) .rg-pane{display:none}
+.q-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;font-size:12px}
+.q-chip{border:1px solid;border-left-width:3px;padding:5px 9px;background:#0d0d0c;color:var(--ink);font:inherit;
+font-size:12px;cursor:pointer;text-align:left;min-height:32px}.q-chip:hover{background:#17130a}
+.rg-filter{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+.rg-filter button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border);
+padding:4px 8px;min-height:30px;cursor:pointer;letter-spacing:.04em}
+.rg-filter button:hover{border-color:var(--amber)}
+.rg-filter button i{display:inline-block;width:9px;height:9px;margin-right:6px}
+.rg-filter button[aria-pressed=false]{opacity:.38;text-decoration:line-through}
+.rg-filter button[data-all]{color:var(--amber2)}
 .rg:has(#rg-sec:checked) .rg-sec,.rg:has(#rg-mag7:checked) .rg-mag7{display:block}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
 .grid2>section>h2:first-child{margin-top:22px}
@@ -491,6 +501,20 @@ def set_chrome(result: dict[str, Any] | None, state: dict[str, Any], cfg: dict[s
     _chrome["status"] = f'<div class="statusbar">{"".join(parts)}</div>'
 
 
+RG_JS = """
+document.querySelectorAll('.rg-pane').forEach(function(p){
+var on={};p.querySelectorAll('button.rg-s').forEach(function(b){on[b.dataset.s]=true});
+function draw(){p.querySelectorAll('[data-s]').forEach(function(e){
+if(e.tagName==='BUTTON')e.setAttribute('aria-pressed',on[e.dataset.s]?'true':'false');
+else e.style.display=on[e.dataset.s]?'':'none'})}
+p.addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b||!p.contains(b))return;
+if(b.dataset.s!==undefined){on[b.dataset.s]=!on[b.dataset.s]}
+else if(b.dataset.q!==undefined){var keep=b.dataset.q.split(' ');Object.keys(on).forEach(function(k){on[k]=keep.indexOf(k)>=0})}
+else if(b.dataset.all!==undefined){Object.keys(on).forEach(function(k){on[k]=b.dataset.all==='1'})}
+draw()});draw()});
+"""
+
+
 def _page(active: str, sub: str, body: str, script: str) -> str:
     nav = "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}><b>{n}</b>{code}</a>'
@@ -515,7 +539,7 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 {body}
 {_chrome["status"]}
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
-</main><script>{script}</script></body></html>"""
+</main><script>{script}{RG_JS}</script></body></html>"""
 
 
 def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: set[str],
@@ -590,6 +614,9 @@ QUADRANTS = {  # name: (CSS colour token, corner of the graph)
 }
 
 
+MAG7_TAIL_WEEKS = 4
+
+
 def _rotation_graph(rot: dict[str, Any], mag7: dict[str, Any] | None = None) -> str:
     """Relative rotation graph of the sectors, with a toggle to the same graph for the Mag 7 stocks."""
     views = [(key, label, what, r) for key, label, what, r in
@@ -597,16 +624,35 @@ def _rotation_graph(rot: dict[str, Any], mag7: dict[str, Any] | None = None) -> 
              if any(v.get("tail") for v in r.values())]
     if not views:
         return ""
-    legend = "".join(
-        f'<span><i style="background:var({QUADRANTS[q][0]})"></i>{q.capitalize()}</span>'
-        for q in ("leading", "weakening", "lagging", "improving"))
+    marks = {"leading": "▲", "improving": "↗", "weakening": "↘", "lagging": "▼"}
     panes = []
     for key, label, what, r in views:
-        tails = {name: v["tail"] for name, v in r.items() if v.get("tail")}
-        unit = "sector" if key == "sec" else "stock"
+        stocks = key == "mag7"
+        # Single stocks swing far more than sector ETFs: a shorter tail and a colour per stock keep
+        # each one's path readable, and the axes zoom to those recent weeks.
+        tails = {name: v["tail"][-(MAG7_TAIL_WEEKS + 1):] if stocks else v["tail"] for name, v in r.items() if v.get("tail")}
+        palette = ({name: f"--s{i}" for i, name in enumerate(sorted(tails, key=lambda n: r[n]["etf"]), 1)}
+                   if stocks else None)
+        unit = "stock" if stocks else "sector"
+        # Filters (see RG_JS): a button per series, one per quadrant showing only its members, All and None.
+        order = sorted(tails, key=lambda n: -r[n]["ratio"])
+        series = "".join(
+            f'<button type="button" class="rg-s" data-s="{escape(r[n]["etf"])}" aria-pressed="true" title="{escape(n)}">'
+            f'<i style="background:var({palette[n] if palette else QUADRANTS[r[n]["quadrant"]][0]})"></i>'
+            f'{escape(r[n]["etf"])}</button>' for n in sorted(tails, key=lambda n: r[n]["etf"]))
+        quads = "".join(
+            f'<button type="button" class="q-chip" data-q="{" ".join(escape(r[n]["etf"]) for n in order if r[n]["quadrant"] == q)}" '
+            f'style="border-color:var({QUADRANTS[q][0]})" title="Show only the {q} ones">'
+            f'<b style="color:var({QUADRANTS[q][0]})">{marks[q]} {q.capitalize()}</b> '
+            + ", ".join(escape(r[n]["etf"]) for n in order if r[n]["quadrant"] == q) + "</button>"
+            for q in ("leading", "improving", "weakening", "lagging") if any(r[n]["quadrant"] == q for n in tails))
+        legend, summary = "", (
+            f'<div class="q-chips">{quads}</div>'
+            f'<div class="rg-filter" aria-label="Show or hide">{series}'
+            f'<button type="button" data-all="1">All</button><button type="button" data-all="0">None</button></div>')
         panes.append(
-            f'<div class="rg-pane rg-{key}">'
-            f'{_both(_rotation_svg(r, tails, (760, 560, 64, 24, 24, 56), key + "d", what), _rotation_svg(r, tails, (420, 440, 44, 12, 18, 44), key + "m", what))}'
+            f'<div class="rg-pane rg-{key}">{summary}'
+            f'{_both(_rotation_svg(r, tails, (760, 560, 64, 24, 24, 56), key + "d", what, palette), _rotation_svg(r, tails, (420, 440, 44, 12, 18, 44), key + "m", what, palette))}'
             f'<p class="muted small">Each line is a {unit}&#39;s last {len(next(iter(tails.values()))) - 1} weeks against '
             f'SPY; the large dot is now, labelled with its ticker. They rotate clockwise: leading, then weakening, lagging '
             f'and improving, then back to leading. Hover over (or tap) a dot for its values.</p></div>')
@@ -616,18 +662,27 @@ def _rotation_graph(rot: dict[str, Any], mag7: dict[str, Any] | None = None) -> 
             f'<input type="radio" name="rg" id="rg-{key}" class="rg-{key}-in"{" checked" if i == 0 else ""}>'
             f'<label for="rg-{key}">{label}</label>' for i, (key, label, _, _) in enumerate(views))
         toggle = f'<div class="rg-toggle" role="radiogroup" aria-label="Rotation graph">{toggle}</div>'
-    return f'<div class="panel rg">{toggle}<div class="legend">{legend}</div>{"".join(panes)}</div>'
+    return f'<div class="panel rg">{toggle}{"".join(panes)}</div>'
 
 
 def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, prefix: str,
-                  what: str = "sector ETFs") -> str:
+                  what: str = "sector ETFs", palette: dict[str, str] | None = None) -> str:
+    """`palette` gives each series its own colour token; without it series take their quadrant's colour."""
     """One drawing of the rotation graph at the given (width, height, left, right, top, bottom)."""
     W, H, L, R, T, B = size
     narrow = W < 600
     xs = [p["ratio"] for t in tails.values() for p in t]
     ys = [p["momentum"] for t in tails.values() for p in t]
-    xspan = max(max(abs(v - 100) for v in xs) * 1.15, 1.0)
-    yspan = max(max(abs(v - 100) for v in ys) * 1.15, 1.0)
+    if palette:
+        # Zoom to where the series are now (every head, and most of the recent path); a tail that
+        # swung further out is cut off at the frame rather than shrinking everything else.
+        hx = [t[-1]["ratio"] for t in tails.values()]
+        hy = [t[-1]["momentum"] for t in tails.values()]
+        xspan = max(max(abs(v - 100) for v in hx) * 1.2, float(np.percentile([abs(v - 100) for v in xs], 75)) * 1.15, 1.0)
+        yspan = max(max(abs(v - 100) for v in hy) * 1.2, float(np.percentile([abs(v - 100) for v in ys], 75)) * 1.15, 1.0)
+    else:
+        xspan = max(max(abs(v - 100) for v in xs) * 1.15, 1.0)
+        yspan = max(max(abs(v - 100) for v in ys) * 1.15, 1.0)
 
     def x(v: float) -> float:
         return L + (W - L - R) * (v - (100 - xspan)) / (2 * xspan)
@@ -661,15 +716,20 @@ def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, pref
                  f'<text transform="translate(12 {(T + H - B) / 2:.1f}) rotate(-90)" text-anchor="middle" '
                  f'fill="var(--ink2)">{y_title}</text>')
 
+    def colour(name: str) -> str:
+        return palette[name] if palette else QUADRANTS[rot[name]["quadrant"]][0]
+
     markers = "".join(
-        f'<marker id="arrow-{prefix}-{q}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
+        f'<marker id="arrow-{prefix}{token}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
         f'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var({token})"/></marker>'
-        for q, (token, _) in QUADRANTS.items())
-    parts.insert(0, f"<defs>{markers}</defs>")
+        for token in sorted({colour(n) for n in tails}))
+    frame = f'<clipPath id="clip-{prefix}"><rect x="{L}" y="{T}" width="{W - L - R}" height="{H - T - B}"/></clipPath>'
+    parts.insert(0, f"<defs>{markers}{frame}</defs>")
     heads = []
     for name, tail in sorted(tails.items(), key=lambda kv: rot[kv[0]]["rank"], reverse=True):
         r = rot[name]
-        token = QUADRANTS[r["quadrant"]][0]
+        parts.append(f'<g data-s="{escape(r["etf"])}" clip-path="url(#clip-{prefix})">')
+        token = colour(name)
         coords = [(x(p["ratio"]), y(p["momentum"])) for p in tail]
         n = len(coords) - 1
         for i in range(n):  # older weeks fade, the latest segment carries the direction arrow
@@ -679,7 +739,7 @@ def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, pref
                 length = max(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5, 1e-6)
                 if length > 12:
                     x2, y2 = x2 - (x2 - x1) / length * 9, y2 - (y2 - y1) / length * 9
-                    arrow = f' marker-end="url(#arrow-{prefix}-{r["quadrant"]})"'
+                    arrow = f' marker-end="url(#arrow-{prefix}{token})"'
             parts.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" stroke="var({token})" '
                          f'stroke-width="2" stroke-linecap="round" opacity="{0.25 + 0.55 * (i + 1) / n:.2f}"{arrow}/>')
         for i, p in enumerate(tail):
@@ -691,6 +751,7 @@ def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, pref
                 f'<circle cx="{coords[i][0]:.1f}" cy="{coords[i][1]:.1f}" r="{7 if head else 2.5}" fill="var({token})" '
                 f'stroke="var(--surface)" stroke-width="2" opacity="{1 if head else 0.25 + 0.5 * i / n:.2f}">'
                 f'<title>{escape(tip)}</title></circle>')
+        parts.append("</g>")
         heads.append((coords[-1], r["etf"]))
 
     # Labels: try right, left, above and below each head; keep the first spot that clears every
@@ -709,7 +770,7 @@ def _rotation_svg(rot: dict[str, Any], tails: dict[str, list], size: tuple, pref
             if clear:
                 break
         placed.append(box)
-        parts.append(f'<text x="{hx + dx:.1f}" y="{hy + dy:.1f}" text-anchor="{anchor}" font-size="12" font-weight="600" '
+        parts.append(f'<text data-s="{escape(etf)}" x="{hx + dx:.1f}" y="{hy + dy:.1f}" text-anchor="{anchor}" font-size="12" font-weight="600" '
                      f'fill="var(--ink)" stroke="var(--surface)" stroke-width="3" paint-order="stroke">{escape(etf)}</text>')
 
     return (f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Relative rotation graph of the {what}" '
