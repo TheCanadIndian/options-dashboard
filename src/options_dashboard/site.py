@@ -101,6 +101,20 @@ td a{color:var(--amber2);text-decoration:none}td a:hover{text-decoration:underli
 .filters label{display:inline-flex;align-items:center;min-height:36px}
 .filters select{font:inherit;padding:6px 8px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border)}
 .card:target{outline:1px solid var(--amber)}
+details.acct{margin:0;padding:0 10px;border-top:1px solid var(--border);align-self:start}
+details.acct>summary{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;list-style:none;
+text-transform:none;color:var(--ink);font-weight:400}
+details.acct>summary::-webkit-details-marker{display:none}
+.acct-name{font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:13px}
+.acct-name::before{content:"▸ ";color:var(--amber)}details.acct[open] .acct-name::before{content:"▾ "}
+.acct-sub{grid-column:1/-1;color:var(--muted);font-size:11.5px}
+details.acct[open]>summary{border-bottom:1px solid var(--border);margin-bottom:4px}
+.trade{border-top:1px solid #1c1c1b;padding:8px 0}.trade:first-of-type{border-top:0}
+.trade-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.trade .facts{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+.acct-tools{display:flex;gap:6px;margin:0 0 8px}
+.acct-tools button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--amber2);border:1px solid var(--border);
+padding:5px 10px;min-height:30px;cursor:pointer}
 .dbar{position:relative;height:6px;background:var(--track)}
 .dbar span{position:absolute;top:0;height:6px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:12px;background:var(--axis)}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink2);margin-bottom:6px}
@@ -502,6 +516,10 @@ def set_chrome(result: dict[str, Any] | None, state: dict[str, Any], cfg: dict[s
 
 
 RG_JS = """
+document.querySelectorAll('[data-acct]').forEach(function(b){b.addEventListener('click',function(){
+document.querySelectorAll('details.acct').forEach(function(d){d.open=b.dataset.acct==='1'})})});
+function openAcct(){var d=location.hash&&document.querySelector('details.acct'+location.hash);if(d)d.open=true}
+window.addEventListener('hashchange',openAcct);openAcct();
 document.querySelectorAll('.rg-pane').forEach(function(p){
 var on={};p.querySelectorAll('button.rg-s').forEach(function(b){on[b.dataset.s]=true});
 function draw(){p.querySelectorAll('[data-s]').forEach(function(e){
@@ -1416,6 +1434,36 @@ def _account_stats(state: dict[str, Any]) -> dict[str, Any]:
             "drop": drop, "started": state["started"]}
 
 
+def _exit_levels(pos: dict[str, Any]) -> tuple[str, str]:
+    """The stop and the profit-take, as set at entry."""
+    up = pos["type"] == "call"
+    if pos.get("stop_spot") is not None:
+        stop = (f'{escape(pos["ticker"])} {"below" if up else "above"} {_money(pos["stop_spot"])} '
+                f'({escape(pos["stop_label"])}), or option bid {_money(pos["stop_price"])}')
+        take = (f'{escape(pos["ticker"])} {"above" if up else "below"} {_money(pos["target_spot"])} '
+                f'({escape(pos["target_label"])}), or option bid {_money(pos["target_price"])}')
+        return stop, take
+    return f'option bid {_money(pos["stop_price"])}', f'option bid {_money(pos["target_price"])}'
+
+
+def _trade(pos: dict[str, Any], commission: float) -> str:
+    """One trade inside a strategy card: times, prices, exit levels and the reasoning behind it."""
+    stop, take = _exit_levels(pos)
+    if "exit_time" in pos:
+        pnl = _delta(pos["pnl"], pos["ret"])
+        when = (f'<div><span>Bought (ET)</span><b>{_when(pos["opened"])} at {_money(pos["entry_price"])}</b></div>'
+                f'<div><span>Sold (ET)</span><b>{_when(pos["exit_time"])} at {_money(pos["exit_price"])}</b></div>'
+                f'<div><span>Why sold</span><b>{escape(pos["exit_reason"])}</b></div>')
+    else:
+        value = pos["last_bid"] * 100 - commission
+        pnl = _delta(value - pos["cost"], value / pos["cost"] - 1)
+        when = (f'<div><span>Bought (ET)</span><b>{_when(pos["opened"])} at {_money(pos["entry_price"])}</b></div>'
+                f'<div><span>Bid now</span><b>{_money(pos["last_bid"])}</b></div>')
+    return (f'<div class="trade"><div class="trade-head"><b>{escape(pos["label"])}</b><span class="pl">{pnl}</span></div>'
+            f'<div class="facts">{when}<div><span>Stop</span><b>{stop}</b></div>'
+            f'<div><span>Take profit</span><b>{take}</b></div></div>{_review(pos)}{_reasoning(pos, False)}</div>')
+
+
 def render_strategies(cfg: dict[str, Any]) -> str:
     accounts = portfolio.accounts(cfg)
     states = {a["id"]: portfolio.load(portfolio.account_cfg(cfg, a["id"]), a["id"]) for a in accounts}
@@ -1460,24 +1508,21 @@ def render_strategies(cfg: dict[str, Any]) -> str:
         s, st = states[a["id"]], stats[a["id"]]
         rules = "".join(f"<li>{escape(describe(k, v))}</li>" for k, v in a["rules"].items()) \
             or "<li>The shared settings, unchanged</li>"
-        open_rows = "".join(
-            f'<li>{escape(p["label"])}: paid {_money(p["entry_price"])}, bid {_money(p["last_bid"])} '
-            f'{_delta((p["last_bid"] - p["entry_price"]) * 100, p["last_bid"] / p["entry_price"] - 1)}</li>'
-            for p in s["positions"]) or '<li class="muted">None</li>'
-        closed_rows = "".join(
-            f'<li>{escape(c["label"])}: {_delta(c["pnl"], c["ret"])} · {escape(c["exit_reason"])}</li>'
-            for c in reversed(s["closed"][-6:])) or '<li class="muted">None yet</li>'
+        open_rows = "".join(_trade(p, cfg["sim_commission"]) for p in sorted(s["positions"], key=lambda p: p["opened"], reverse=True))
+        closed_rows = "".join(_trade(c, cfg["sim_commission"]) for c in reversed(s["closed"][-6:]))
         cards.append(
-            f'<article class="card" id="acct-{a["id"]}"><header><h3>{escape(a["name"])}</h3>'
-            f'<div class="pl">{_delta(st["value"] - s["start_cash"], st["return"])}</div></header>'
-            f'<p class="small muted">{escape(a["summary"])}</p>'
-            f'<details><summary>Rules, positions and trades</summary><h4>Rule changes from the shared settings</h4>'
-            f'<ul>{rules}</ul><h4>Open positions</h4><ul>{open_rows}</ul><h4>Latest closed trades</h4>'
-            f'<ul>{closed_rows}</ul></details></article>')
+            f'<details class="card acct" id="acct-{a["id"]}"><summary>'
+            f'<span class="acct-name">{escape(a["name"])}</span>'
+            f'<span class="pl">{_delta(st["value"] - s["start_cash"], st["return"])}</span>'
+            f'<span class="acct-sub">{escape(a["summary"])} · {len(s["positions"])} open · {len(s["closed"])} closed</span>'
+            f'</summary><h4>Rule changes from the shared settings</h4><ul>{rules}</ul>'
+            f'<h4>Open positions</h4>{open_rows or "<p class=muted>None</p>"}'
+            f'<h4>Latest closed trades</h4>{closed_rows or "<p class=muted>None yet</p>"}</details>')
 
     body = f"""<h2>Leaderboard</h2>{table}
 <h2>Value over time</h2><div class="panel">{chart}</div>
-<h2>Each strategy</h2><div class="cards">{"".join(cards)}</div>
+<h2>Each strategy</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
+<button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(cards)}</div>
 <p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the
 same moments, so differences come from the rules. Every account only buys to open and sells to close.</p>"""
     return _page("Strategies", "Several simulated accounts, each trying different rules on the same scans.", body,
