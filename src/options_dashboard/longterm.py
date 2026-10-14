@@ -695,5 +695,6 @@ if __name__ == "__main__":
         print(f"Screened {res['screened']} of {res['members']}; shortlisted {len(res['shortlist'])}; "
               f"{len(res.get('cash_machines', []))} cash machines; {len(res['failed'])} without enough data")
     site.OUT.with_name("invest.html").write_text(site.render_invest(load()), encoding="utf-8")
+    site.refresh_nav()
     if "--publish" in sys.argv:
         print(site.publish() or "Published")

@@ -547,12 +547,31 @@ draw()});draw()});
 """
 
 
-def _page(active: str, sub: str, body: str, script: str) -> str:
-    _load_chrome()
-    nav = "".join(
+def _nav(active: str) -> str:
+    return "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}><b>{n}</b>{code}</a>'
         for n, (name, code, href) in enumerate(NAV, 1)
     )
+
+
+def refresh_nav() -> None:
+    """Rewrite the tab bar on every built page, so a page added outside a scan (the research run)
+    appears in the menu at once rather than after the next scan rebuilds the other pages."""
+    import re
+    for page in OUT.parent.glob("*.html"):
+        html = page.read_text(encoding="utf-8")
+        current = next((name for name, _, href in NAV if href == page.name), None)
+        if current is None:
+            continue
+        new = re.sub(r'(<nav aria-label="Pages">).*?(</nav>)', lambda m: m.group(1) + _nav(current) + m.group(2),
+                     html, count=1, flags=re.S)
+        if new != html:
+            page.write_text(new, encoding="utf-8")
+
+
+def _page(active: str, sub: str, body: str, script: str) -> str:
+    _load_chrome()
+    nav = _nav(active)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
