@@ -53,7 +53,8 @@ FUNDAMENTALS_MAX_AGE = 7 * 86400
 SHORTLIST = 25
 PER_SECTOR = 4
 EARNINGS_SECTORS = {"Financials", "Real Estate"}  # free cash flow means little for banks, insurers and REITs
-INFO_KEYS = ("shortName", "longBusinessSummary", "sector", "industry", "marketCap", "trailingPE", "forwardPE",
+RAW_VERSION = 2  # bump to refetch every cached company after a change to what is stored
+INFO_KEYS = ("currency", "financialCurrency", "quoteType", "shortName", "longBusinessSummary", "sector", "industry", "marketCap", "trailingPE", "forwardPE",
              "trailingEps", "forwardEps", "dividendYield", "payoutRatio", "targetMeanPrice", "targetLowPrice",
              "targetHighPrice", "numberOfAnalystOpinions", "recommendationKey", "beta", "grossMargins",
              "operatingMargins", "returnOnEquity", "earningsGrowth", "revenueGrowth")
@@ -100,7 +101,9 @@ def fundamentals(ticker: str) -> dict[str, Any]:
     path = RAW_DIR / f"{ticker}.json"
     try:
         if time.time() - path.stat().st_mtime < FUNDAMENTALS_MAX_AGE:
-            return json.loads(path.read_text(encoding="utf-8"))
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            if cached.get("v") == RAW_VERSION:
+                return cached
     except (OSError, json.JSONDecodeError):
         pass
     tk = yf.Ticker(ticker)
@@ -120,8 +123,11 @@ def fundamentals(ticker: str) -> dict[str, Any]:
         s = divs.copy()
         s.index = pd.to_datetime(s.index).year
         by_year = {int(y): float(v) for y, v in s.groupby(level=0).sum().items()}
-    raw = {"ticker": ticker, "fetched": datetime.now().isoformat(timespec="seconds"),
-           "info": {k: info.get(k) for k in INFO_KEYS}, "annual": annual, "dividends": by_year}
+    splits = data.call(lambda: tk.splits)
+    raw = {"v": RAW_VERSION, "ticker": ticker, "fetched": datetime.now().isoformat(timespec="seconds"),
+           "info": {k: info.get(k) for k in INFO_KEYS}, "annual": annual, "dividends": by_year,
+           "splits": {str(pd.Timestamp(d).date()): float(r) for d, r in (splits.items() if splits is not None else [])
+                      if r and r > 0}}
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(raw), encoding="utf-8")
     return raw
@@ -156,6 +162,18 @@ def weekly_prices(tickers: list[str], cache: str = "weekly.pkl") -> dict[str, pd
 
 # ---------------------------------------------------------------- per-company metrics
 
+def _annual(raw: dict[str, Any]) -> tuple[list[str], list[dict[str, float]]] | None:
+    """Annual rows, oldest first, or None when the reports are in a different currency from the
+    share price, as with many foreign listings. Yahoo already restates share counts and EPS for
+    stock splits, so they line up with its split-adjusted prices; the splits are kept for reference."""
+    info = raw["info"]
+    fin, cur = info.get("financialCurrency"), info.get("currency")
+    if fin and cur and fin != cur:
+        return None
+    years = sorted(raw["annual"])
+    return years, [raw["annual"][y] for y in years]
+
+
 def _cagr(series: list[float], years: int) -> float | None:
     if len(series) <= years or series[-1 - years] <= 0 or series[-1] <= 0:
         return None
@@ -168,10 +186,10 @@ def _price_on(prices: pd.DataFrame, day: str) -> float | None:
 
 
 def metrics(raw: dict[str, Any], prices: pd.DataFrame, sector: str) -> dict[str, Any] | None:
-    years = sorted(raw["annual"])
-    if len(years) < 2 or prices is None or prices.empty:
+    annual = _annual(raw)
+    if annual is None or len(annual[0]) < 2 or prices is None or prices.empty:
         return None
-    a = [raw["annual"][y] for y in years]  # oldest first
+    years, a = annual  # oldest first
     latest = a[-1]
     info = raw["info"]
     price = float(prices["Close"].iloc[-1])
@@ -386,7 +404,8 @@ def cash_candidates() -> list[str]:
         while True:
             res = data.call(yf.screen, q, offset=offset, size=250, sortField="intradaymarketcap", sortAsc=True)
             quotes = res.get("quotes", [])
-            found |= {x["symbol"] for x in quotes if x.get("quoteType") == "EQUITY" and "." not in x["symbol"]}
+            found |= {x["symbol"] for x in quotes if x.get("quoteType") == "EQUITY" and "." not in x["symbol"]
+                      and "-P" not in x["symbol"]}
             offset += len(quotes)
             if not quotes or offset >= res.get("total", 0):
                 break
@@ -400,8 +419,11 @@ def cash_machine(raw: dict[str, Any], prices: pd.DataFrame | None) -> dict[str, 
     info = raw["info"]
     if (info.get("sector") or "") == "Financial Services" or prices is None or prices.empty:
         return None  # a bank's or insurer's cash flow statement does not measure free cash
-    years = sorted(raw["annual"])
-    a = [raw["annual"][y] for y in years]
+    annual = _annual(raw)
+    name = info.get("shortName") or ""
+    if annual is None or "Preferred" in name or "Depositary" in name:
+        return None  # foreign-currency reports, or preferred shares priced against the common share count
+    years, a = annual
     fcf = [r["fcf"] for r in a if r.get("fcf") is not None]
     shares = a[-1].get("shares")
     if len(fcf) < 3 or not shares or fcf[-1] <= 0:
@@ -534,6 +556,31 @@ def _notes() -> dict[str, Any]:
         return {}
 
 
+def _blend_industry(rows: list[dict[str, Any]]) -> None:
+    """Set each company's fair multiple to the average of its own four-year median and its
+    industry's median today, then re-derive the targets. When a whole industry has been re-rated
+    (software in 2026, say), assuming every member returns to its own past multiple overstates the
+    upside; the industry today is the market's current verdict on that kind of business."""
+    by_industry: dict[str, list[float]] = {}
+    for r in rows:
+        if r.get("multiple_now"):
+            by_industry.setdefault(r["industry"], []).append(r["multiple_now"])
+    medians = {k: float(np.median(v)) for k, v in by_industry.items() if len(v) >= 3}
+    for r in rows:
+        if not r.get("multiple_now"):
+            continue
+        own, ind = r["fair_multiple"], medians.get(r["industry"])
+        fair = own if ind is None else float(np.clip((own + ind) / 2, 8, 60))
+        g, per_share, price = r["growth_used"], r["per_share"], r["price"]
+        r.update(own_multiple=own, industry_multiple=ind, fair_multiple=fair, fair_value=per_share * fair,
+                 base_multiple=(r["multiple_now"] + fair) / 2,
+                 # Priced far below its own history: a bargain, or the market seeing a problem first.
+                 derated=bool(r["multiple_now"] < 0.6 * own))
+        r["base"] = per_share * (1 + g) * r["base_multiple"]
+        r["stretch"] = per_share * (1 + g) ** 3 * fair
+        r["expected_return"] = (r["stretch"] / price) ** (1 / 3) - 1 + r["dividend_yield"]
+
+
 def refresh() -> dict[str, Any]:
     """Refresh data, score the index, build the shortlist with buy areas and targets, and save it."""
     members = sp500()
@@ -558,6 +605,7 @@ def refresh() -> dict[str, Any]:
                      "analyst_high": info.get("targetHighPrice"), "analysts": info.get("numberOfAnalystOpinions"),
                      "recommendation": info.get("recommendationKey"), "beta": info.get("beta"),
                      "fundamentals_date": raw["fetched"][:10], **m})
+    _blend_industry(rows)
     scored = score(pd.DataFrame(rows).set_index("ticker"))
     picks = shortlist(scored)
     notes = _notes()

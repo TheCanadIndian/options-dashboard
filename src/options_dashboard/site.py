@@ -1604,6 +1604,11 @@ def _status(area: dict[str, Any]) -> str:
 def _why_listed(r: dict[str, Any]) -> list[str]:
     """Plain-language reasons from the numbers behind the scores."""
     out = []
+    if r.get("derated"):
+        own = r.get("own_multiple") or r["fair_multiple"]
+        out.append(f"⚠ Sharply de-rated: it trades at {r['multiple_now']:.1f}× {r['metric']}, under 60% of its own "
+                   f"{own:.1f}×. Either a bargain or the market sees a problem the numbers don't show yet (a threat to "
+                   f"the business, a coming slowdown). Find out why before buying; the targets assume it is a bargain")
     roc = r.get("return_on_capital")
     if roc is not None:
         what = "return on equity" if r.get("earnings_based") else "return on invested capital"
@@ -1632,8 +1637,11 @@ def _why_listed(r: dict[str, Any]) -> list[str]:
     if r.get("share_change") is not None and r["share_change"] < -0.005:
         out.append(f"Buys back stock: share count falling {abs(r['share_change']):.1%} a year")
     if r.get("multiple_now") and r.get("fair_multiple"):
-        out.append(f"Trades at {r['multiple_now']:.1f}× {r['metric']} against its usual {r['fair_multiple']:.1f}× "
-                   f"(median of {', '.join(f'{m:g}×' for m in r.get('history_multiples') or [])})")
+        own, ind = r.get("own_multiple") or r["fair_multiple"], r.get("industry_multiple")
+        out.append(f"Trades at {r['multiple_now']:.1f}× {r['metric']}; its own four-year median is {own:.1f}× "
+                   f"({', '.join(f'{m:g}×' for m in r.get('history_multiples') or [])})"
+                   + (f" and its industry trades at {ind:.1f}× today, so the fair multiple is {r['fair_multiple']:.1f}×"
+                      if ind else ""))
     return out
 
 
@@ -1653,9 +1661,11 @@ def _research_card(r: dict[str, Any]) -> str:
     if r.get("per_share") and r.get("fair_multiple"):
         target_math = (f'<li>{r["metric"].capitalize()} per share: {_money(r["per_share"])} in the latest annual report, grown '
                        f'{r["growth_used"]:.0%} a year (its own recent rate, capped at 20%)</li>'
-                       f'<li>Base, 1 year: valued at {r["base_multiple"]:.1f}×, halfway from today&#39;s {r["multiple_now"]:.1f}× to its '
-                       f'usual {r["fair_multiple"]:.1f}× → {_upside(r["base"], price)}</li>'
-                       f'<li>Stretch, 3 years: valued at its usual {r["fair_multiple"]:.1f}× → {_upside(r["stretch"], price)} '
+                       f'<li>Fair multiple {r["fair_multiple"]:.1f}×: the average of its own four-year median and what its industry '
+                       f'trades at today, so an industry the market has re-rated is not assumed to snap back</li>'
+                       f'<li>Base, 1 year: valued at {r["base_multiple"]:.1f}×, halfway from today&#39;s {r["multiple_now"]:.1f}× to '
+                       f'the fair {r["fair_multiple"]:.1f}× → {_upside(r["base"], price)}</li>'
+                       f'<li>Stretch, 3 years: valued at the fair {r["fair_multiple"]:.1f}× → {_upside(r["stretch"], price)} '
                        f'(about {r["expected_return"]:.0%} a year including the dividend)</li>')
     analysts = (f'<li>Analysts ({int(r["analysts"])}): low {_money(r["analyst_low"])}, average {_money(r["analyst_mean"])}, '
                 f'high {_money(r["analyst_high"])}</li>' if r.get("analysts") and r.get("analyst_mean") else "")
@@ -1669,7 +1679,7 @@ def _research_card(r: dict[str, Any]) -> str:
         f'<details class="card acct" id="lt-{escape(r["ticker"])}"><summary>'
         f'<span class="acct-name">{escape(r["ticker"])} · {escape(r["name"])}</span>'
         f'<span class="pl">{_money(price)}</span>'
-        f'<span class="acct-sub">{escape(r["sector"])} · buy area {_money(a["low"])}–{_money(a["high"])} · {_status(a)} · '
+        f'<span class="acct-sub">{"⚠ de-rated · " if r.get("derated") else ""}{escape(r["sector"])} · buy area {_money(a["low"])}–{_money(a["high"])} · {_status(a)} · '
         f'base {_upside(r["base"], price)}</span></summary>'
         f'<div class="tags">{styles}<span class="tag">Quality {r["quality"]:.0f}</span><span class="tag">Growth {r["growth"]:.0f}</span>'
         + (f'<span class="tag">Dividend {r["dividend"]:.0f}</span>' if r.get("dividend") is not None else "")
@@ -1740,7 +1750,7 @@ def render_invest(res: dict[str, Any]) -> str:
                         for k, v, d in tiles)
 
     now_rows = "".join(
-        f'<tr>{_cell(r["ticker"], f"<a href=#lt-{escape(r["ticker"])}>{escape(r["ticker"])}</a>", False)}'
+        f'<tr>{_cell(r["ticker"], f"<a href=#lt-{escape(r["ticker"])}>{escape(r["ticker"])}</a>" + (" ⚠" if r.get("derated") else ""), False)}'
         f'{_cell(r["name"], escape(r["name"]), False)}{_cell(", ".join(r["styles"]), escape(", ".join(r["styles"]) or "–"), False)}'
         f'{_cell(r["price"], _money(r["price"]))}{_cell(r["buy_area"]["low"], f"{_money(r["buy_area"]["low"])}–{_money(r["buy_area"]["high"])}")}'
         f'{_cell(r["buy_area"]["status"], _status(r["buy_area"]), False)}{_cell(r["base"] / r["price"], _upside(r["base"], r["price"]))}'
@@ -1751,7 +1761,7 @@ def render_invest(res: dict[str, Any]) -> str:
            if now_rows else '<p class="muted">Nothing on the shortlist is in or near its buy area right now. Waiting is a position too.</p>')
 
     rows = "".join(
-        f'<tr>{_cell(r["ticker"], f"<a href=#lt-{escape(r["ticker"])}>{escape(r["ticker"])}</a>", False)}'
+        f'<tr>{_cell(r["ticker"], f"<a href=#lt-{escape(r["ticker"])}>{escape(r["ticker"])}</a>" + (" ⚠" if r.get("derated") else ""), False)}'
         f'{_cell(r["name"], escape(r["name"]), False)}{_cell(r["sector"], escape(r["sector"]), False)}'
         f'{_cell(", ".join(r["styles"]), escape(", ".join(r["styles"]) or "–"), False)}'
         f'{_cell(r["quality"], f"{r["quality"]:.0f}")}{_cell(r["growth"], f"{r["growth"]:.0f}")}'
@@ -1767,7 +1777,8 @@ def render_invest(res: dict[str, Any]) -> str:
              '<th>Quality</th><th>Growth</th><th>Dividend</th><th>Value</th><th>Overall</th><th>Price</th><th>Buy area</th><th>Status</th>'
              f'<th>Base (1y)</th><th>Stretch (3y)</th><th>Analysts</th></tr></thead><tbody>{rows}</tbody></table></div>')
 
-    cm_rows = "".join(
+    def cm_table_for(ms: list[dict[str, Any]]) -> str:
+        cm_rows = "".join(
         f'<tr>{_cell(m["ticker"], escape(m["ticker"]), False)}{_cell(m["name"], escape(m["name"]), False)}'
         f'{_cell(m.get("industry") or "", escape(m.get("industry") or ""), False)}'
         f'{_cell(m["fcf_yield"], f"<b>{m["fcf_yield"]:.0%}</b>")}{_cell(m["avg_yield"], f"{m["avg_yield"]:.0%}")}'
@@ -1776,11 +1787,17 @@ def render_invest(res: dict[str, Any]) -> str:
         f'{_cell(m["net_cash_share"], _p(m["net_cash_share"], 0, True))}{_cell(m["price"], _money(m["price"]))}'
         f'{_cell(m["in_sp500"], "Fractional" if m["in_sp500"] else ("Whole shares" if m["price"] <= 250 else "Whole shares, over $250"), False)}'
         f'{_cell(m["buy_area"]["status"], _status(m["buy_area"]), False)}{_cell((m["target"] or 0) / m["price"], _upside(m["target"], m["price"]))}</tr>'
-        for m in machines)
-    cm_table = ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Ticker</th><th>Company</th><th>Industry</th>'
+        for m in ms)
+        return ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Ticker</th><th>Company</th><th>Industry</th>'
                 '<th>FCF yield</th><th>4-yr avg</th><th>Worst year</th><th>4 yrs of FCF vs price</th><th>Verdict</th>'
                 '<th>Cash returned</th><th>Net cash</th><th>Price</th><th>At Schwab</th><th>Status</th><th>Re-rating target</th>'
                 f'</tr></thead><tbody>{cm_rows}</tbody></table></div>') if cm_rows else '<p class="muted">None this week.</p>'
+
+    steady = [m for m in machines if m["verdict"].startswith(("Durable", "Steady"))]
+    risky = [m for m in machines if not m["verdict"].startswith(("Durable", "Steady"))]
+    cm_table = cm_table_for(steady[:40]) + (
+        f'<details><summary>Peak-cycle, uneven and falling ({len(risky)}): high yields that may not last</summary>'
+        f'{cm_table_for(risky[:30])}</details>' if risky else "")
 
     names = {"quality": "Quality compounders", "growth": "Growth", "dividend": "Dividend growth", "value": "Undervalued"}
     leaders = "".join(
@@ -1820,6 +1837,8 @@ setting the account back.</li>
 <li>Buying in pieces (some now, more if it falls into the lower half of its buy area) avoids having to pick the bottom.</li>
 <li>In a Roth IRA, dividends and gains are tax-free, so reinvesting dividends compounds fully.</li></ul></div>
 <h2>Shortlist</h2>{table}
+<p class="muted small">⚠ Sharply de-rated: trading under 60% of its own usual valuation. That can be a bargain or a
+warning the numbers can't show yet; its card explains, and it is worth finding out why before buying.</p>
 <h2>Company research</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(_research_card(r) for r in picks)}</div>
 <h2>Cash machines: free cash flow against market value</h2>
