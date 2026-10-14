@@ -433,6 +433,100 @@ def cash_machine(raw: dict[str, Any], prices: pd.DataFrame | None) -> dict[str, 
     }
 
 
+# ---------------------------------------------------------------- themes and emerging industries
+
+THEMES = HOME / "research" / "themes.json"
+
+
+def _rs(df: pd.DataFrame | None, spy: pd.DataFrame, weeks: int) -> float | None:
+    """Return over `weeks` relative to SPY's: +0.10 means it beat SPY by 10%."""
+    if df is None or len(df) <= weeks or len(spy) <= weeks:
+        return None
+    p, s = df["Close"], spy["Close"]
+    return float((p.iloc[-1] / p.iloc[-1 - weeks]) / (s.iloc[-1] / s.iloc[-1 - weeks]) - 1)
+
+
+def _median(xs: list[float | None]) -> float | None:
+    xs = [x for x in xs if x is not None]
+    return float(np.median(xs)) if xs else None
+
+
+def themes(scored: pd.DataFrame, in_index: set[str]) -> tuple[list[dict[str, Any]], pd.DataFrame | None]:
+    """Each researched theme's tiers with live strength against SPY, and whether the outer tiers
+    (suppliers and enablers) are lagging the leaders: the extrapolation the research is after."""
+    try:
+        doc = json.loads(THEMES.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], None
+    tickers = sorted({t for th in doc["themes"] for tier in th["tiers"] for t in tier["tickers"]} | {"SPY"})
+    px = weekly_prices(tickers, "weekly_themes.pkl")
+    spy = px.get("SPY")
+    if spy is None:
+        return [], None
+    out = []
+    for th in doc["themes"]:
+        tiers = []
+        for tier in th["tiers"]:
+            members = []
+            for t, why in tier["tickers"].items():
+                df = px.get(t)
+                q = scored["quality"].get(t) if t in scored.index else None
+                members.append({"ticker": t, "why": why, "in_sp500": t in in_index,
+                                "price": float(df["Close"].iloc[-1]) if df is not None else None,
+                                "rs13": _rs(df, spy, 13), "rs52": _rs(df, spy, 52),
+                                "quality": None if q is None or pd.isna(q) else float(q),
+                                "status": buy_area(df, None)["status"] if df is not None and len(df) >= 52 else None})
+            tiers.append({"tier": tier["tier"], "why": tier["why"], "members": members,
+                          "rs13": _median([m["rs13"] for m in members]), "rs52": _median([m["rs52"] for m in members])})
+        lead = tiers[0]
+        signals = []
+        for t in tiers[1:]:
+            if lead["rs52"] is None or t["rs52"] is None:
+                continue
+            gap = lead["rs52"] - t["rs52"]
+            turning = t["rs13"] is not None and lead["rs13"] is not None and t["rs13"] > lead["rs13"]
+            if gap >= 0.10:
+                signals.append(f"{t['tier']} has trailed the first order by {gap:.0%} over a year"
+                               + (", and has started catching up over the last 3 months: the extrapolation is "
+                                  "beginning to play out" if turning else ": room to catch up if the theme holds"))
+            elif gap <= -0.10:
+                signals.append(f"{t['tier']} has beaten the first order by {-gap:.0%} over a year: the market is "
+                               "already paying for this link in the chain")
+        r13 = _median([t["rs13"] for t in tiers])
+        r52 = _median([t["rs52"] for t in tiers])
+        if r13 is None or r52 is None:
+            verdict = "Not enough history"
+        elif r13 > 0 and r52 > 0:
+            verdict = "Working: beating SPY over 3 months and a year"
+        elif r13 > 0:
+            verdict = "Turning up: beating SPY over 3 months after a weak year"
+        elif r52 > 0:
+            verdict = "Cooling: ahead over a year but behind SPY over 3 months"
+        else:
+            verdict = "Not working yet: behind SPY over 3 months and a year"
+        out.append({k: th[k] for k in ("id", "name", "thesis", "evidence", "sources", "risks", "watch")}
+                   | {"tiers": tiers, "signals": signals, "verdict": verdict, "rs13": r13, "rs52": r52})
+    return out, spy
+
+
+def emerging_industries(members: pd.DataFrame, prices: dict[str, pd.DataFrame], spy: pd.DataFrame) -> dict[str, list]:
+    """S&P 500 sub-industries ranked by whether their strength against SPY is accelerating: the last
+    three months against the pace of the last year. Themes often show up here before they get a name."""
+    rows = []
+    for industry, grp in members.groupby("industry"):
+        rs = [(t, _rs(prices.get(t), spy, 13), _rs(prices.get(t), spy, 52)) for t in grp["symbol"]]
+        rs = [(t, a, b) for t, a, b in rs if a is not None and b is not None]
+        if len(rs) < 3:
+            continue
+        r13, r52 = float(np.median([a for _, a, _ in rs])), float(np.median([b for _, _, b in rs]))
+        rows.append({"industry": industry, "sector": grp["sector"].iloc[0], "members": len(rs), "rs13": r13, "rs52": r52,
+                     "acceleration": r13 - r52 * 13 / 52,
+                     "leaders": [t for t, _, _ in sorted(rs, key=lambda x: -x[1])[:4]]})
+    rows.sort(key=lambda r: -r["acceleration"])
+    return {"gaining": [r for r in rows if r["rs13"] > 0][:10],
+            "fading": [r for r in reversed(rows) if r["rs13"] < 0][:10]}
+
+
 def _notes() -> dict[str, Any]:
     try:
         return json.loads(NOTES.read_text(encoding="utf-8"))
@@ -498,6 +592,13 @@ def refresh() -> dict[str, Any]:
     result = {"built": datetime.now(data.NEW_YORK).isoformat(timespec="minutes"), "screened": len(scored),
               "members": len(members), "failed": failed, "shortlist": out, "leaders": leaders,
               "cash_machines": machines, "cash_candidates": len(candidates)}
+    theme_list, spy = themes(scored, in_index)
+    result["themes"] = theme_list
+    try:
+        result["themes_meta"] = {k: json.loads(THEMES.read_text(encoding="utf-8")).get(k) for k in ("date", "author")}
+    except (OSError, json.JSONDecodeError):
+        result["themes_meta"] = {}
+    result["industries"] = emerging_industries(members, prices, spy) if spy is not None else {"gaining": [], "fading": []}
     DIR.mkdir(parents=True, exist_ok=True)
     LATEST.write_text(json.dumps(result, default=float), encoding="utf-8")
     return result

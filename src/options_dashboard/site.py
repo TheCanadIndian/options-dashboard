@@ -1684,6 +1684,43 @@ def _research_card(r: dict[str, Any]) -> str:
         f'<p class="muted small">Fundamentals from the {escape(r.get("fundamentals_date") or "")} refresh.</p></details>')
 
 
+def _rel(x: float | None) -> str:
+    if x is None:
+        return "–"
+    x = 0.0 if abs(x) < 0.005 else x
+    return f'<span class="{"up" if x >= 0 else "down"}">{x:+.0%}</span>'
+
+
+def _theme_card(th: dict[str, Any]) -> str:
+    tiers = ""
+    for t in th["tiers"]:
+        rows = "".join(
+            f'<tr><td><b>{escape(m["ticker"])}</b></td><td class="small">{escape(m["why"])}</td>'
+            f'<td class="num">{_rel(m["rs13"])}</td><td class="num">{_rel(m["rs52"])}</td>'
+            f'<td class="num">{"–" if m["quality"] is None else f"{m["quality"]:.0f}"}</td>'
+            f'<td>{escape(m["status"] or "–")}</td>'
+            f'<td>{"Fractional" if m["in_sp500"] else "Whole shares"}</td></tr>' for m in t["members"])
+        tiers += (f'<h4>{escape(t["tier"])}: {escape(t["why"])} · vs SPY {_rel(t["rs13"])} 3 mo, {_rel(t["rs52"])} 1 yr</h4>'
+                  f'<div class="scroll"><table><thead><tr><th>Ticker</th><th>Why it benefits</th><th>3 mo vs SPY</th>'
+                  f'<th>1 yr vs SPY</th><th>Quality</th><th>Buy area</th><th>At Schwab</th></tr></thead><tbody>{rows}</tbody></table></div>')
+    signals = "".join(f'<p class="review"><b>Extrapolation:</b> {escape(x)}.</p>' for x in th["signals"])
+    links = " · ".join(f'<a href="{escape(u)}" rel="noopener">{escape(u.split("/")[2])}</a>' for u in th["sources"])
+    return (f'<details class="card acct"><summary><span class="acct-name">{escape(th["name"])}</span>'
+            f'<span class="pl">{_rel(th["rs52"])} 1 yr</span><span class="acct-sub">{escape(th["verdict"])}</span></summary>'
+            f'<p>{escape(th["thesis"])}</p><h4>Evidence</h4><ul>{"".join(f"<li>{escape(e)}</li>" for e in th["evidence"])}</ul>'
+            f'{signals}{tiers}<h4>Risks</h4><ul>{"".join(f"<li>{escape(r)}</li>" for r in th["risks"])}</ul>'
+            f'<h4>What to watch</h4><ul>{"".join(f"<li>{escape(w)}</li>" for w in th["watch"])}</ul>'
+            f'<p class="muted small">Sources: {links}</p></details>')
+
+
+def _industry_rows(rows: list[dict[str, Any]]) -> str:
+    return "".join(
+        f'<tr>{_cell(r["industry"], escape(r["industry"]), False)}{_cell(r["sector"], escape(r["sector"]), False)}'
+        f'{_cell(r["rs13"], _rel(r["rs13"]))}{_cell(r["rs52"], _rel(r["rs52"]))}{_cell(r["acceleration"], f"{r["acceleration"]:+.1%}")}'
+        f'{_cell(r["members"], str(r["members"]))}{_cell(", ".join(r["leaders"]), escape(", ".join(r["leaders"])), False)}</tr>'
+        for r in rows)
+
+
 def render_invest(res: dict[str, Any]) -> str:
     if not res:
         body = ('<p class="muted">The first research run has not finished yet. It runs after the close each weekday '
@@ -1751,6 +1788,27 @@ def render_invest(res: dict[str, Any]) -> str:
         + "".join(f'<li>{escape(x["ticker"])} · {escape(x["name"])} <span class="muted">({x["score"]:.0f})</span></li>' for x in v)
         + "</ol></div>" for k, v in res["leaders"].items())
 
+    meta = res.get("themes_meta") or {}
+    ind = res.get("industries") or {}
+    ind_head = ('<tr><th>Industry</th><th>Sector</th><th>3 mo vs SPY</th><th>1 yr vs SPY</th><th>Acceleration</th>'
+                '<th>Companies</th><th>Strongest</th></tr>')
+    themes_html = ""
+    if res.get("themes"):
+        themes_html = (
+            f'<h2>Themes and what else could benefit</h2>'
+            f'<p class="small">Each theme is traced from the obvious winners (first order) to the companies that supply or enable them '
+            f'(second order) and further out (third order). The live numbers show whether the market agrees: when an outer tier '
+            f'has lagged the leaders, it may still have room to catch up; when it is already ahead, the market is paying for it. '
+            f'Research written {escape(meta.get("date") or "")}; prices and strength update daily.</p>'
+            f'<div class="cards">{"".join(_theme_card(t) for t in res["themes"])}</div>')
+    if ind.get("gaining"):
+        themes_html += (
+            f'<h2>Emerging: industries gaining strength</h2><p class="small">S&amp;P 500 industries whose strength against SPY '
+            f'over the last 3 months is running ahead of their pace over the last year. New themes often show up here before '
+            f'anyone names them.</p><div class="panel scroll"><table class="sortable"><thead>{ind_head}</thead>'
+            f'<tbody>{_industry_rows(ind["gaining"])}</tbody></table></div>'
+            f'<h2>Fading: industries losing strength</h2><div class="panel scroll"><table class="sortable"><thead>{ind_head}</thead>'
+            f'<tbody>{_industry_rows(ind["fading"])}</tbody></table></div>')
     body = f"""<div class="tiles">{tile_html}</div>
 <p class="notice">Research to help you decide, not advice. Every number comes from public company reports and prices, and
 can be wrong or out of date; check the company yourself before you buy.</p>
@@ -1773,6 +1831,7 @@ the market charges for the whole company today. Companies outside the S&amp;P 50
 {cm_table}
 <p class="muted small">Re-rating target: the price at which the average year's free cash flow would be a 10% yield. Banks and insurers
 are left out, since their cash flow statements don't measure free cash. Screened from {res.get("cash_candidates", 0)} candidates.</p>
+{themes_html}
 <h2>Leaders by style</h2><div class="cards">{leaders}</div>
 <h2>How this works</h2><div class="panel small"><ul style="margin:0">
 <li>Every S&amp;P 500 company gets four scores, as percentiles against the rest (100 is best): quality (return on capital, cash

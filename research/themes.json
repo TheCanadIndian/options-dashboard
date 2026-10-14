@@ -1,0 +1,182 @@
+{
+  "date": "2026-10-13",
+  "author": "Claude, from public reporting; a dated snapshot, not a live feed. Ask to refresh it.",
+  "themes": [
+    {
+      "id": "ai_power",
+      "name": "AI runs out of power",
+      "thesis": "AI's limit has moved from chips to electricity. The big five cloud companies plan close to $690B of 2026 capex, but transformers take 3 to 5 years to deliver and switchgear is sold out through 2028, so 30-50% of data centers due this year face delays. Whoever can supply power, grid equipment or on-site generation is being paid to remove the bottleneck.",
+      "evidence": [
+        "Hyperscaler 2026 capex plans near $690B (Amazon ~$200B, Alphabet $175-185B, Meta $115-135B, Microsoft $120B+)",
+        "Transformer lead times 3-5 years; switchgear sold out through 2028",
+        "US utilities plan about $1.4T of capex, up 27%, much of it for data-center load"
+      ],
+      "sources": ["https://enkiai.com/data-center/data-center-power-crisis-2026-the-grid-bottleneck/",
+                  "https://tech-insider.org/us-utility-1-4-trillion-ai-data-center-energy-2026/",
+                  "https://www.spheron.network/blog/ai-data-center-power-constraints-2026/"],
+      "tiers": [
+        {"tier": "First order", "why": "Sell the power or the generating equipment directly",
+         "tickers": {"GEV": "Gas turbines and grid equipment, the most direct way to add power fast",
+                     "CEG": "Largest US nuclear fleet; signs long contracts with data centers",
+                     "VST": "Power producer with nuclear and gas plants in data-center markets",
+                     "ETN": "Electrical gear inside and around every data center"}},
+        {"tier": "Second order", "why": "Build, connect and cool what the first order sells",
+         "tickers": {"PWR": "Builds transmission lines and substations; the grid's main contractor",
+                     "HUBB": "Grid hardware and connectors, with long-dated utility demand",
+                     "VRT": "Data-center cooling and power distribution",
+                     "WMB": "Gas pipelines that feed the on-site turbines going up beside data centers",
+                     "SO": "Utility with some of the largest data-center load additions in the Southeast"}},
+        {"tier": "Third order", "why": "Raw materials and specialist labour the buildout cannot do without",
+         "tickers": {"FCX": "Copper: every megawatt of grid and data center needs tonnes of it; record price in January",
+                     "EME": "Electrical and mechanical contractor; skilled electricians are a bottleneck too",
+                     "CCJ": "Uranium, if nuclear restarts and new reactors follow the power shortage",
+                     "BE": "Fuel cells, an on-site power option that skips the grid queue"}}
+      ],
+      "risks": ["Capex cuts if AI revenue disappoints: the whole chain re-rates together",
+                "Many first-order names already price in years of growth",
+                "Politics: higher electricity bills could cap what utilities may charge"],
+      "watch": ["Hyperscaler capex guidance each quarter", "Transformer and turbine order backlogs", "Utility rate-case outcomes"]
+    },
+    {
+      "id": "ai_memory_network",
+      "name": "AI's other bottlenecks: memory and networking",
+      "thesis": "Each new AI chip needs far more high-bandwidth memory (Blackwell B200 carries 192 GB against the H100's 80 GB) and faster links between chips. SK Hynix and Micron have sold out 2026 HBM, and 800G optical transceivers are on 40+ week lead times. Spending shifts from the GPU itself to what surrounds it.",
+      "evidence": [
+        "HBM takes about 23% of DRAM wafer output in 2026, up from about 19%",
+        "Micron and SK Hynix 2026 HBM sold out",
+        "800G optical transceiver lead times past 40 weeks"
+      ],
+      "sources": ["https://enkiai.com/data-center/hbm-supply-crisis-2026-the-bottleneck-redefining-ai/",
+                  "https://introl.com/blog/ai-memory-supercycle-hbm-2026",
+                  "https://accuristech.com/blog/ai-data-center-electronic-component-supply/"],
+      "tiers": [
+        {"tier": "First order", "why": "Design the AI chips and switches",
+         "tickers": {"NVDA": "The GPUs", "AVGO": "Custom AI chips for cloud companies and networking silicon",
+                     "ANET": "Ethernet switches for AI clusters"}},
+        {"tier": "Second order", "why": "Make the memory and optics every cluster needs more of",
+         "tickers": {"MU": "The only US maker of HBM memory, sold out for 2026",
+                     "COHR": "Optical transceivers and lasers for chip-to-chip links",
+                     "CIEN": "Optical networking between data centers",
+                     "GLW": "Optical fibre and connectivity"}},
+        {"tier": "Third order", "why": "Equip and test the factories making more memory",
+         "tickers": {"LRCX": "Etch and deposition tools; memory makers are its biggest customers",
+                     "AMAT": "Chip-making equipment across memory and logic",
+                     "KLAC": "Inspection tools; more complex chips need more of them",
+                     "TER": "Testers for memory and AI chips"}}
+      ],
+      "risks": ["Memory is famously cyclical: shortages turn to gluts when capacity catches up",
+                "Export controls on China hit equipment makers",
+                "AI spending pause would hit second and third order hardest"],
+      "watch": ["HBM pricing and contract length", "Memory makers' capex plans", "Optical lead times"]
+    },
+    {
+      "id": "rearmament",
+      "name": "Global rearmament",
+      "thesis": "Military spending is set to pass $2.6T in 2026, the fastest sustained rearmament since the Cold War, and the proposed US budget nears $1.5T. Primes win the contracts, but they are capacity-constrained; the suppliers of castings, specialty metals, energetics and electronics are where shortages and pricing power show up.",
+      "evidence": [
+        "Global military spending projected above $2.6T in 2026",
+        "Proposed US FY2027 defense spending approaching $1.5T",
+        "US metal foundries adding capacity driven by defense demand"
+      ],
+      "sources": ["https://informedclearly.com/en/war/51777/global-defense-rearmament-military-spending-2026",
+                  "https://www.solidmarketresearch.com/post/america-s-foundries-are-filling-back-up-inside-the-defense-driven-reshoring-boom",
+                  "https://www.cnbc.com/2026/07/01/europe-defense-stocks-rearmament.html"],
+      "tiers": [
+        {"tier": "First order", "why": "Prime contractors that win the programmes",
+         "tickers": {"LMT": "F-35, missiles", "RTX": "Missiles, air defence, jet engines",
+                     "GD": "Submarines, armoured vehicles, munitions", "NOC": "Bombers, space, nuclear deterrent",
+                     "LHX": "Communications, sensors, rocket motors"}},
+        {"tier": "Second order", "why": "Parts the primes cannot make enough of",
+         "tickers": {"HWM": "Engine and airframe castings and fasteners",
+                     "TDG": "Sole-source aerospace components with pricing power",
+                     "HEI": "Aerospace and defense electronics and parts",
+                     "BWXT": "Naval nuclear reactors for submarines and carriers"}},
+        {"tier": "Third order", "why": "Specialty materials and new kinds of warfare",
+         "tickers": {"ATI": "Titanium and specialty alloys", "CRS": "Specialty alloys for engines and munitions",
+                     "KTOS": "Drones and hypersonic test vehicles", "PLTR": "Battlefield software and targeting"}}
+      ],
+      "risks": ["Budget fights and continuing resolutions delay awards",
+                "A peace deal would cool the most crowded names", "Fixed-price contracts squeeze primes on cost overruns"],
+      "watch": ["US budget passage", "European procurement orders", "Prime contractor backlogs"]
+    },
+    {
+      "id": "reshoring",
+      "name": "Reshoring and the industrial buildout",
+      "thesis": "Factories, chip plants, data centers and grid upgrades are being built in the US at the same time, so leadership this year has rotated to industrials and materials. The second-order winners are the local, hard-to-import inputs: aggregates, steel, contractors and the distributors that keep job sites running.",
+      "evidence": [
+        "Industrials, materials, energy and staples have led the market in 2026 while tech lagged",
+        "Market leadership broadening beyond the largest companies in the second half"
+      ],
+      "sources": ["https://www.investing.com/analysis/sector-rotation-intensifies-value-outperforms-growth-in-2026-market-split-200675093",
+                  "https://www.morningstar.com/markets/is-stock-market-rotation-underway-these-sectors-are-outpacing-tech-2026",
+                  "https://finance.yahoo.com/news/3-manufacturing-stocks-benefit-reshoring-144300623.html"],
+      "tiers": [
+        {"tier": "First order", "why": "Equipment that goes into new plants",
+         "tickers": {"CAT": "Construction and mining machines, power generation", "ROK": "Factory automation",
+                     "EMR": "Process automation and controls"}},
+        {"tier": "Second order", "why": "Local materials and contractors",
+         "tickers": {"MLM": "Aggregates: crushed stone can't be shipped far, so local quarries price well",
+                     "VMC": "Aggregates and asphalt", "NUE": "US steel, protected by tariffs",
+                     "FIX": "Mechanical and electrical contractor for plants and data centers"}},
+        {"tier": "Third order", "why": "Supplies and space the buildout keeps buying",
+         "tickers": {"FAST": "Fasteners and job-site supplies on a vending model",
+                     "GWW": "Maintenance and repair supplies for every new plant",
+                     "PLD": "Warehouses near new factories and ports"}}
+      ],
+      "risks": ["Higher rates stall construction", "Tariff reversals change the maths of building here",
+                "Aggregates and steel are cyclical"],
+      "watch": ["Manufacturing construction spending", "ISM new orders", "Aggregates pricing"]
+    },
+    {
+      "id": "obesity",
+      "name": "Obesity drugs go mainstream",
+      "thesis": "Obesity drugs are already about a $42B market, with roughly $100B more expected by 2029, and pills now make them easier to take and ship. The makers are obvious; the second order is everything needed to produce injectables and pills at that scale, and the third order is how a lighter population changes what it buys.",
+      "evidence": [
+        "Tirzepatide sales: Mounjaro $39.1B and Zepbound $22.9B; Wegovy $18.6B",
+        "Oral semaglutide approved late 2025 and rolling out in 2026",
+        "Medtech volumes so far not hurt by GLP-1 use"
+      ],
+      "sources": ["https://www.corstrate.com/post/obesity-drug-pipeline-2026",
+                  "https://www.cnbc.com/2026/01/10/2026-is-the-year-of-obesity-pills-from-novo-nordisk-eli-lilly-.html",
+                  "https://www.jpmorgan.com/insights/global-research/current-events/obesity-drugs"],
+      "tiers": [
+        {"tier": "First order", "why": "Make the drugs", "tickers": {"LLY": "Tirzepatide (Mounjaro, Zepbound), the leader",
+                                                                    "NVO": "Semaglutide (Ozempic, Wegovy) and the first pill"}},
+        {"tier": "Second order", "why": "Supply the factories, vials and pens",
+         "tickers": {"WST": "Injection components used in pens and vials",
+                     "TMO": "Drug manufacturing services and lab equipment",
+                     "DHR": "Bioprocessing equipment for drug production",
+                     "BDX": "Syringes and drug-delivery devices"}},
+        {"tier": "Third order", "why": "How spending shifts when people eat less and move more",
+         "tickers": {"PLNT": "Gyms: people on the drugs are told to keep muscle",
+                     "COST": "Bulk grocery buyers shifting toward fresh and protein",
+                     "ISRG": "Surgery volumes rise as more patients become eligible for procedures"}}
+      ],
+      "risks": ["Price cuts as Medicare negotiates and competitors arrive",
+                "Pills reduce the need for pens and injection parts", "Third-order effects are the least certain"],
+      "watch": ["Weekly prescription data", "Pill uptake", "Insurance coverage decisions"]
+    },
+    {
+      "id": "energy_tight",
+      "name": "Tight oil and gas supply",
+      "thesis": "Energy is the best sector of 2026, up more than 40% this year on supply worries. When oil and gas stay high, producers turn into cash machines; the second order is the companies that drill and move the product, and the third is shipping, where rates can explode the way container rates did for ZIM.",
+      "evidence": ["Energy up 16.3% in the third quarter and more than 40% this year, the best S&P 500 sector"],
+      "sources": ["https://www.fidelity.com/bin-public/600_Fidelity_Com_English/documents/Quarterly-Sector-and-Investment-Research-Update-Q3-2026.PDF",
+                  "https://www.schroders.com/en-gb/uk/intermediary/insights/quarterly-markets-review---q3-2026/"],
+      "tiers": [
+        {"tier": "First order", "why": "Produce the oil and gas",
+         "tickers": {"XOM": "Largest US oil major", "CVX": "Oil major with a strong balance sheet",
+                     "COP": "Largest independent producer", "EOG": "Low-cost shale producer"}},
+        {"tier": "Second order", "why": "Drill, export and process it",
+         "tickers": {"SLB": "Oilfield services, paid more when producers spend more", "BKR": "Services plus gas turbines and LNG equipment",
+                     "LNG": "US LNG exporter", "VLO": "Refiner; wide fuel margins when supply is tight"}},
+        {"tier": "Third order", "why": "Ship it: rates spike when supply routes are disrupted",
+         "tickers": {"FRO": "Crude tankers", "DHT": "Crude tankers", "STNG": "Product tankers"}}
+      ],
+      "risks": ["Oil can fall fast if supply worries ease or a recession hits demand",
+                "Shipping is the most cyclical of all: ZIM's cash flow collapsed once rates normalised",
+                "Producers in a boom may overspend on new supply"],
+      "watch": ["Oil inventories", "OPEC+ decisions", "Tanker day rates"]
+    }
+  ]
+}
