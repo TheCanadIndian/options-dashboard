@@ -1781,22 +1781,25 @@ def render_invest(res: dict[str, Any]) -> str:
         cm_rows = "".join(
         f'<tr>{_cell(m["ticker"], escape(m["ticker"]), False)}{_cell(m["name"], escape(m["name"]), False)}'
         f'{_cell(m.get("industry") or "", escape(m.get("industry") or ""), False)}'
-        f'{_cell(m["fcf_yield"], f"<b>{m["fcf_yield"]:.0%}</b>")}{_cell(m["avg_yield"], f"{m["avg_yield"]:.0%}")}'
-        f'{_cell(m["worst_yield"], f"{m["worst_yield"]:.0%}")}{_cell(m["four_year_fcf_vs_cap"], f"{m["four_year_fcf_vs_cap"]:.2f}×")}'
-        f'{_cell(m["verdict"], escape(m["verdict"]), False)}{_cell(m["returned_share"], f"{m["returned_share"]:.0%}")}'
+        f'{_cell(m["ev_yield"], f"<b>{m["ev_yield"]:.0%}</b>")}{_cell(m["ev_avg"], f"{m["ev_avg"]:.0%}")}'
+        f'{_cell(m["ev_worst"], f"{m["ev_worst"]:.0%}")}{_cell(m["fcf_yield"], f"{m["fcf_yield"]:.0%}")}'
+        f'{_cell(m["four_year_fcf_vs_cap"], f"{m["four_year_fcf_vs_cap"]:.2f}×")}'
+        f'{_cell(m["verdict"], escape(m["verdict"]) + (f"<br><span class=muted>⚠ {escape(m["caution"])}</span>" if m.get("caution") else ""), False)}{_cell(m["returned_share"], f"{m["returned_share"]:.0%}")}'
         f'{_cell(m["net_cash_share"], _p(m["net_cash_share"], 0, True))}{_cell(m["price"], _money(m["price"]))}'
         f'{_cell(m["in_sp500"], "Fractional" if m["in_sp500"] else ("Whole shares" if m["price"] <= 250 else "Whole shares, over $250"), False)}'
         f'{_cell(m["buy_area"]["status"], _status(m["buy_area"]), False)}{_cell((m["target"] or 0) / m["price"], _upside(m["target"], m["price"]))}</tr>'
         for m in ms)
         return ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Ticker</th><th>Company</th><th>Industry</th>'
-                '<th>FCF yield</th><th>4-yr avg</th><th>Worst year</th><th>4 yrs of FCF vs price</th><th>Verdict</th>'
+                '<th>FCF yield on EV</th><th>4-yr avg on EV</th><th>Worst year on EV</th><th>On market value</th>'
+                '<th>4 yrs of FCF vs price</th><th>Verdict</th>'
                 '<th>Cash returned</th><th>Net cash</th><th>Price</th><th>At Schwab</th><th>Status</th><th>Re-rating target</th>'
                 f'</tr></thead><tbody>{cm_rows}</tbody></table></div>') if cm_rows else '<p class="muted">None this week.</p>'
 
     steady = [m for m in machines if m["verdict"].startswith(("Durable", "Steady"))]
     risky = [m for m in machines if not m["verdict"].startswith(("Durable", "Steady"))]
+    # The steady table puts non-cyclical names first (the sort already does); cyclical ones carry a warning.
     cm_table = cm_table_for(steady[:40]) + (
-        f'<details><summary>Peak-cycle, uneven and falling ({len(risky)}): high yields that may not last</summary>'
+        f'<details><summary>Peak-cycle, debt-heavy, uneven and falling ({len(risky)}): high yields that may not last</summary>'
         f'{cm_table_for(risky[:30])}</details>' if risky else "")
 
     names = {"quality": "Quality compounders", "growth": "Growth", "dividend": "Dividend growth", "value": "Undervalued"}
@@ -1842,13 +1845,17 @@ warning the numbers can't show yet; its card explains, and it is worth finding o
 <h2>Company research</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(_research_card(r) for r in picks)}</div>
 <h2>Cash machines: free cash flow against market value</h2>
-<p class="small">Companies whose free cash flow is at least 12% of their whole market value, from all US-listed stocks. ZIM in 2021 was
+<p class="small">Companies whose free cash flow is at least 10% of their enterprise value (market value plus net debt: what
+buying the whole company costs, its debts included), from all US-listed stocks. Measured against market value alone, an
+indebted company's cash flow looks far bigger than what shareholders get, since lenders are paid first. ZIM in 2021 was
 the extreme case: a year of cash flow close to the price of the entire company. It was also the top of a shipping boom, and its
 cash flow collapsed in 2023. So the verdict asks whether the cash is <b>durable</b> (high in every one of the last four years) or a
 <b>peak</b> (one year far above the rest). "4 yrs of FCF vs price" above 1.0× means the last four years of cash flow exceed what
 the market charges for the whole company today. Companies outside the S&amp;P 500 can only be bought in whole shares at Schwab.</p>
 {cm_table}
-<p class="muted small">Re-rating target: the price at which the average year's free cash flow would be a 10% yield. Banks and insurers
+<p class="muted small">Re-rating target: the share price at which a typical year's free cash flow (the four-year average, or
+the worst year for cyclical companies) would be a 10% yield on enterprise value. Companies in cyclical industries (shipping, energy, mining, metals, chemicals, autos, airlines and the like)
+are marked, since their best years tend to come together. Banks and insurers
 are left out, since their cash flow statements don't measure free cash. Screened from {res.get("cash_candidates", 0)} candidates.</p>
 {themes_html}
 <h2>Leaders by style</h2><div class="cards">{leaders}</div>

@@ -382,7 +382,11 @@ def shortlist(scored: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------- cash machines
 
 CM_MIN_CAP = 300_000_000
-CM_MIN_YIELD = 0.12  # free cash flow as a share of market value, latest year
+CM_MIN_YIELD = 0.12  # screener pre-filter: free cash flow as a share of market value
+CM_MIN_EV_YIELD = 0.10  # kept: latest free cash flow as a share of enterprise value
+CYCLICAL = ("shipping", "marine", "oil & gas", "coal", "steel", "metals", "mining", "gold", "silver", "copper",
+            "aluminum", "chemicals", "auto", "airline", "homebuilding", "building materials", "lumber", "fertilizer",
+            "agricultural", "semiconductor", "memory", "trucking", "freight")
 
 
 def cash_candidates() -> list[str]:
@@ -434,24 +438,36 @@ def cash_machine(raw: dict[str, Any], prices: pd.DataFrame | None) -> dict[str, 
     prior = float(np.median(fcf[:-1]))
     returned = abs(a[-1].get("dividends_paid") or 0) + abs(a[-1].get("buybacks") or 0)
     net_cash = (a[-1].get("cash") or 0) - (a[-1].get("debt") or 0)
+    # Enterprise value: what buying the whole company costs, its debt included. Against market value
+    # alone, a heavily indebted company's cash flow looks far larger than what shareholders get.
+    ev = max(cap - net_cash, cap * 0.25)
     if prior > 0 and latest > 2 * prior:
         verdict = "Peak-cycle risk: the latest year is more than double the usual"
     elif latest < 0.6 * avg:
         verdict = "Falling: the latest year is well below the average"
-    elif worst > 0 and worst / cap >= 0.08:
-        verdict = "Durable: every year above an 8% yield"
+    elif -net_cash > 1.5 * cap:
+        verdict = f"Debt-heavy: net debt is {-net_cash / cap:.1f}× the market value, so lenders have first claim"
+    elif worst > 0 and worst / ev >= 0.08:
+        verdict = "Durable: every year above an 8% yield on enterprise value"
     elif worst > 0:
         verdict = "Steady: positive every year"
     else:
         verdict = "Uneven: at least one year burned cash"
-    per_share_avg = avg / shares
+    industry = (info.get("industry") or "").lower()
+    caution = ("Cyclical industry: four good years can still be one long boom, as ZIM's were"
+               if any(k in industry for k in CYCLICAL) else None)
+    # Re-rating target: the share price at which a typical year's cash flow would be a 10% yield on
+    # enterprise value. For cyclical companies that is the worst of the four years, not the average,
+    # since the average of a boom is not a typical year.
+    base_fcf = worst if caution else avg
+    target = (base_fcf * 10 + net_cash) / shares if base_fcf > 0 else None
     return {
-        "price": price, "market_cap": cap, "fcf_yield": latest / cap, "avg_yield": avg / cap, "worst_yield": worst / cap,
-        "years_to_pay": cap / avg if avg > 0 else None, "four_year_fcf_vs_cap": sum(fcf[-4:]) / cap,
+        "price": price, "market_cap": cap, "enterprise_value": ev,
+        "fcf_yield": latest / cap, "ev_yield": latest / ev, "ev_avg": avg / ev, "ev_worst": worst / ev,
+        "years_to_pay": ev / avg if avg > 0 else None, "four_year_fcf_vs_cap": sum(fcf[-4:]) / cap,
         "fcf_history": [round(x / 1e6) for x in fcf], "trend": latest / avg if avg > 0 else None, "verdict": verdict,
-        "returned_share": returned / latest, "net_cash_share": net_cash / cap,
-        # Re-rating target: the price at which the average year's cash flow would yield 10%.
-        "target": per_share_avg * 10 if per_share_avg > 0 else None,
+        "caution": caution, "returned_share": returned / latest, "net_cash_share": net_cash / cap,
+        "target": target if target and target > 0 else None,
     }
 
 
@@ -628,15 +644,15 @@ def refresh() -> dict[str, Any]:
             m = cash_machine(raw, cm_prices.get(t))
         except Exception:
             continue
-        if not m or m["fcf_yield"] < CM_MIN_YIELD:
+        if not m or m["ev_yield"] < CM_MIN_EV_YIELD:
             continue
         info = raw["info"]
         machines.append({"ticker": t, "name": info.get("shortName") or t, "sector": info.get("sector"),
                          "industry": info.get("industry"), "summary": (info.get("longBusinessSummary") or "")[:500],
                          "in_sp500": t in in_index, **m, "buy_area": buy_area(cm_prices[t], m["target"]),
                          "note": notes.get(t)})
-    order = {"Durable": 0, "Steady": 1, "Uneven": 2, "Falling": 3, "Peak": 4}
-    machines.sort(key=lambda r: (order[r["verdict"].split(":")[0].split("-")[0]], -r["avg_yield"]))
+    order = {"Durable": 0, "Steady": 1, "Uneven": 2, "Falling": 3, "Debt": 4, "Peak": 5}
+    machines.sort(key=lambda r: (order[r["verdict"].split(":")[0].split("-")[0]], r["caution"] is not None, -r["ev_avg"]))
     result = {"built": datetime.now(data.NEW_YORK).isoformat(timespec="minutes"), "screened": len(scored),
               "members": len(members), "failed": failed, "shortlist": out, "leaders": leaders,
               "cash_machines": machines, "cash_candidates": len(candidates)}
