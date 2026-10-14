@@ -53,7 +53,7 @@ FUNDAMENTALS_MAX_AGE = 7 * 86400
 SHORTLIST = 25
 PER_SECTOR = 4
 EARNINGS_SECTORS = {"Financials", "Real Estate"}  # free cash flow means little for banks, insurers and REITs
-RAW_VERSION = 2  # bump to refetch every cached company after a change to what is stored
+RAW_VERSION = 3  # bump to refetch every cached company after a change to what is stored
 INFO_KEYS = ("currency", "financialCurrency", "quoteType", "shortName", "longBusinessSummary", "sector", "industry", "marketCap", "trailingPE", "forwardPE",
              "trailingEps", "forwardEps", "dividendYield", "payoutRatio", "targetMeanPrice", "targetLowPrice",
              "targetHighPrice", "numberOfAnalystOpinions", "recommendationKey", "beta", "grossMargins",
@@ -61,7 +61,7 @@ INFO_KEYS = ("currency", "financialCurrency", "quoteType", "shortName", "longBus
 ROWS = {  # field: candidate row names in Yahoo's annual statements, first match wins
     "revenue": ("Total Revenue",), "gross_profit": ("Gross Profit",), "ebit": ("EBIT", "Operating Income"),
     "ebitda": ("EBITDA", "Normalized EBITDA"), "net_income": ("Net Income", "Net Income Common Stockholders"),
-    "eps": ("Diluted EPS", "Basic EPS"), "fcf": ("Free Cash Flow",), "dividends_paid": ("Cash Dividends Paid",),
+    "eps": ("Diluted EPS", "Basic EPS"), "fcf": ("Free Cash Flow",), "sbc": ("Stock Based Compensation",), "dividends_paid": ("Cash Dividends Paid",),
     "buybacks": ("Repurchase Of Capital Stock",), "shares": ("Ordinary Shares Number", "Share Issued"),
     "debt": ("Total Debt",), "cash": ("Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"),
     "invested_capital": ("Invested Capital",), "equity": ("Stockholders Equity", "Common Stock Equity"),
@@ -171,7 +171,16 @@ def _annual(raw: dict[str, Any]) -> tuple[list[str], list[dict[str, float]]] | N
     if fin and cur and fin != cur:
         return None
     years = sorted(raw["annual"])
-    return years, [raw["annual"][y] for y in years]
+    rows = []
+    for y in years:
+        # Free cash flow after stock-based pay: shares handed to staff are a real cost to owners
+        # (they dilute them) even though no cash leaves, and tech companies pay a lot that way.
+        r = dict(raw["annual"][y])
+        if r.get("fcf") is not None:
+            r["fcf_reported"] = r["fcf"]
+            r["fcf"] = r["fcf"] - abs(r.get("sbc") or 0)
+        rows.append(r)
+    return years, rows
 
 
 def _cagr(series: list[float], years: int) -> float | None:
@@ -256,7 +265,7 @@ def metrics(raw: dict[str, Any], prices: pd.DataFrame, sector: str) -> dict[str,
             multiples.append(p * r["shares"] / r["fcf"])
     per_share = (latest.get("eps") if earnings_based else
                  (latest["fcf"] / latest["shares"] if latest.get("fcf") and latest.get("shares") else None))
-    m["per_share"], m["metric"] = per_share, "earnings" if earnings_based else "free cash flow"
+    m["per_share"], m["metric"] = per_share, "earnings" if earnings_based else "free cash flow after stock pay"
     if not per_share or per_share <= 0 or not multiples:
         m.update(multiple_now=None, fair_multiple=None, fcf_yield=None, fair_value=None, base=None, stretch=None,
                  growth_used=None, expected_return=None)
@@ -466,7 +475,8 @@ def cash_machine(raw: dict[str, Any], prices: pd.DataFrame | None) -> dict[str, 
         "fcf_yield": latest / cap, "ev_yield": latest / ev, "ev_avg": avg / ev, "ev_worst": worst / ev,
         "years_to_pay": ev / avg if avg > 0 else None, "four_year_fcf_vs_cap": sum(fcf[-4:]) / cap,
         "fcf_history": [round(x / 1e6) for x in fcf], "trend": latest / avg if avg > 0 else None, "verdict": verdict,
-        "caution": caution, "returned_share": returned / latest, "net_cash_share": net_cash / cap,
+        "caution": caution, "returned_share": returned / latest,
+        "stock_pay_share": abs(a[-1].get("sbc") or 0) / a[-1]["fcf_reported"] if a[-1].get("fcf_reported") else None, "net_cash_share": net_cash / cap,
         "target": target if target and target > 0 else None,
     }
 

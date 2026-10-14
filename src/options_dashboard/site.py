@@ -1784,7 +1784,9 @@ def render_invest(res: dict[str, Any]) -> str:
         f'{_cell(m["ev_yield"], f"<b>{m["ev_yield"]:.0%}</b>")}{_cell(m["ev_avg"], f"{m["ev_avg"]:.0%}")}'
         f'{_cell(m["ev_worst"], f"{m["ev_worst"]:.0%}")}{_cell(m["fcf_yield"], f"{m["fcf_yield"]:.0%}")}'
         f'{_cell(m["four_year_fcf_vs_cap"], f"{m["four_year_fcf_vs_cap"]:.2f}×")}'
-        f'{_cell(m["verdict"], escape(m["verdict"]) + (f"<br><span class=muted>⚠ {escape(m["caution"])}</span>" if m.get("caution") else ""), False)}{_cell(m["returned_share"], f"{m["returned_share"]:.0%}")}'
+        f'{_cell(m["verdict"], escape(m["verdict"]) + (f"<br><span class=muted>⚠ {escape(m["caution"])}</span>" if m.get("caution") else "")
+                + (f"<br><span class=muted>Stock pay took {m["stock_pay_share"]:.0%} off reported cash flow</span>"
+                   if (m.get("stock_pay_share") or 0) >= 0.10 else ""), False)}{_cell(m["returned_share"], f"{m["returned_share"]:.0%}")}'
         f'{_cell(m["net_cash_share"], _p(m["net_cash_share"], 0, True))}{_cell(m["price"], _money(m["price"]))}'
         f'{_cell(m["in_sp500"], "Fractional" if m["in_sp500"] else ("Whole shares" if m["price"] <= 250 else "Whole shares, over $250"), False)}'
         f'{_cell(m["buy_area"]["status"], _status(m["buy_area"]), False)}{_cell((m["target"] or 0) / m["price"], _upside(m["target"], m["price"]))}</tr>'
@@ -1845,9 +1847,10 @@ warning the numbers can't show yet; its card explains, and it is worth finding o
 <h2>Company research</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(_research_card(r) for r in picks)}</div>
 <h2>Cash machines: free cash flow against market value</h2>
-<p class="small">Companies whose free cash flow is at least 10% of their enterprise value (market value plus net debt: what
+<p class="small">Companies whose free cash flow, after stock-based pay, is at least 10% of their enterprise value (market value plus net debt: what
 buying the whole company costs, its debts included), from all US-listed stocks. Measured against market value alone, an
-indebted company's cash flow looks far bigger than what shareholders get, since lenders are paid first. ZIM in 2021 was
+indebted company's cash flow looks far bigger than what shareholders get, since lenders are paid first. Stock handed
+to staff is subtracted too: it costs owners through dilution even though no cash leaves the company. ZIM in 2021 was
 the extreme case: a year of cash flow close to the price of the entire company. It was also the top of a shipping boom, and its
 cash flow collapsed in 2023. So the verdict asks whether the cash is <b>durable</b> (high in every one of the last four years) or a
 <b>peak</b> (one year far above the rest). "4 yrs of FCF vs price" above 1.0× means the last four years of cash flow exceed what
@@ -1868,6 +1871,7 @@ history, expected return). Overall leans on quality: 45%, then 20% each growth a
 operating cash earnings, at most four per sector.</li>
 <li>Buy area: the nearest long-term support at or below the price (40-week average, one-year anchored VWAP, one-year volume value
 area, 52-week low) down to the next support at least 4% below it. It is then checked against the company's usual valuation.</li>
+<li>Free cash flow is always counted after stock-based pay, which dilutes owners like any other cost.</li>
 <li>Targets: free cash flow per share (earnings for banks, insurers and real estate) grown at the company's own recent rate,
 capped at 20%. Base (1 year) assumes the valuation multiple closes half the gap to its usual level; stretch (3 years) all of it.</li>
 <li>Company reports refresh weekly and prices after each close. Built {escape(res["built"].replace("T", " "))} ET.</li></ul></div>"""
