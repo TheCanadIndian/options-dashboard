@@ -84,6 +84,20 @@ td a{color:var(--amber2);text-decoration:none}td a:hover{text-decoration:underli
 .filters label{display:inline-flex;align-items:center;min-height:36px}
 .filters select{font:inherit;padding:6px 8px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border)}
 .card:target{outline:1px solid var(--amber)}
+details.acct{margin:0;padding:0 10px;border-top:1px solid var(--border);align-self:start}
+details.acct>summary{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;list-style:none;
+text-transform:none;color:var(--ink);font-weight:400}
+details.acct>summary::-webkit-details-marker{display:none}
+.acct-name{font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:13px}
+.acct-name::before{content:"▸ ";color:var(--amber)}details.acct[open] .acct-name::before{content:"▾ "}
+.acct-sub{grid-column:1/-1;color:var(--muted);font-size:11.5px}
+details.acct[open]>summary{border-bottom:1px solid var(--border);margin-bottom:4px}
+.trade{border-top:1px solid #1c1c1b;padding:8px 0}.trade:first-of-type{border-top:0}
+.trade-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.trade .facts{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+.acct-tools{display:flex;gap:6px;margin:0 0 8px}
+.acct-tools button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--amber2);border:1px solid var(--border);
+padding:5px 10px;min-height:30px;cursor:pointer}
 .dbar{position:relative;height:6px;background:var(--track)}
 .dbar span{position:absolute;top:0;height:6px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:12px;background:var(--axis)}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink2);margin-bottom:6px}
@@ -124,8 +138,8 @@ padding:4px 8px;min-height:30px;cursor:pointer;letter-spacing:.04em}
 main{padding:8px 10px 28px}nav a{padding:8px 9px}}
 </style></head>
 <body>
-<div class="topbar"><span class="brand">OPTIONS TERMINAL</span><span class="clock">LAST SCAN <b>10/13 15:52</b> ET · 15 MIN DELAY</span></div>
-<div class="tape" aria-label="Market quotes"><div class="roll"><span class="q"><span class="sym">VIX</span>15.49 <span class="up">▲+1.84%</span></span><span class="q"><span class="sym">SPY</span>778.31 <span class="up">▲+0.03%</span></span><span class="q"><span class="sym">QQQ</span>743.27 <span class="down">▼-0.37%</span></span><span class="q"><span class="sym">IWM</span>277.02 <span class="down">▼-0.31%</span></span><span class="q"><span class="sym">DIA</span>516.98 <span class="down">▼-0.18%</span></span><span class="q"><span class="sym">TLT</span>78.41 <span class="up">▲+0.45%</span></span><span class="q"><span class="sym">GLD</span>381.75 <span class="down">▼-0.10%</span></span><span class="q"><span class="sym">HYG</span>77.11 <span class="down">▼-0.23%</span></span><span class="q"><span class="sym">IBIT</span>47.09 <span class="up">▲+0.48%</span></span><span class="q"><span class="sym">XLK</span>196.02 <span class="down">▼-0.17%</span></span><span class="q"><span class="sym">XLF</span>54.91 <span class="down">▼-0.25%</span></span><span class="q"><span class="sym">XLE</span>67.03 <span class="up">▲+1.54%</span></span><span class="q"><span class="sym">XLP</span>84.31 <span class="down">▼-0.12%</span></span><span class="q"><span class="sym">VIX</span>15.49 <span class="up">▲+1.84%</span></span><span class="q"><span class="sym">SPY</span>778.31 <span class="up">▲+0.03%</span></span><span class="q"><span class="sym">QQQ</span>743.27 <span class="down">▼-0.37%</span></span><span class="q"><span class="sym">IWM</span>277.02 <span class="down">▼-0.31%</span></span><span class="q"><span class="sym">DIA</span>516.98 <span class="down">▼-0.18%</span></span><span class="q"><span class="sym">TLT</span>78.41 <span class="up">▲+0.45%</span></span><span class="q"><span class="sym">GLD</span>381.75 <span class="down">▼-0.10%</span></span><span class="q"><span class="sym">HYG</span>77.11 <span class="down">▼-0.23%</span></span><span class="q"><span class="sym">IBIT</span>47.09 <span class="up">▲+0.48%</span></span><span class="q"><span class="sym">XLK</span>196.02 <span class="down">▼-0.17%</span></span><span class="q"><span class="sym">XLF</span>54.91 <span class="down">▼-0.25%</span></span><span class="q"><span class="sym">XLE</span>67.03 <span class="up">▲+1.54%</span></span><span class="q"><span class="sym">XLP</span>84.31 <span class="down">▼-0.12%</span></span></div></div>
+<div class="topbar"><span class="brand">OPTIONS TERMINAL</span><span class="clock">LAST SCAN <b>10/14 09:38</b> ET · 15 MIN DELAY</span></div>
+<div class="tape" aria-label="Market quotes"><div class="roll"><span class="q"><span class="sym">VIX</span>15.73 <span class="up">▲+3.01%</span></span><span class="q"><span class="sym">SPY</span>775.40 <span class="down">▼-0.34%</span></span><span class="q"><span class="sym">QQQ</span>738.85 <span class="down">▼-0.63%</span></span><span class="q"><span class="sym">IWM</span>273.56 <span class="down">▼-1.13%</span></span><span class="q"><span class="sym">DIA</span>518.62 <span class="up">▲+0.47%</span></span><span class="q"><span class="sym">TLT</span>77.71 <span class="down">▼-0.84%</span></span><span class="q"><span class="sym">GLD</span>374.67 <span class="down">▼-1.83%</span></span><span class="q"><span class="sym">HYG</span>76.85 <span class="down">▼-0.31%</span></span><span class="q"><span class="sym">IBIT</span>46.64 <span class="down">▼-1.04%</span></span><span class="q"><span class="sym">XLK</span>194.20 <span class="down">▼-1.06%</span></span><span class="q"><span class="sym">XLF</span>54.32 <span class="down">▼-0.91%</span></span><span class="q"><span class="sym">XLE</span>67.69 <span class="up">▲+0.73%</span></span><span class="q"><span class="sym">XLP</span>84.76 <span class="up">▲+0.68%</span></span><span class="q"><span class="sym">VIX</span>15.73 <span class="up">▲+3.01%</span></span><span class="q"><span class="sym">SPY</span>775.40 <span class="down">▼-0.34%</span></span><span class="q"><span class="sym">QQQ</span>738.85 <span class="down">▼-0.63%</span></span><span class="q"><span class="sym">IWM</span>273.56 <span class="down">▼-1.13%</span></span><span class="q"><span class="sym">DIA</span>518.62 <span class="up">▲+0.47%</span></span><span class="q"><span class="sym">TLT</span>77.71 <span class="down">▼-0.84%</span></span><span class="q"><span class="sym">GLD</span>374.67 <span class="down">▼-1.83%</span></span><span class="q"><span class="sym">HYG</span>76.85 <span class="down">▼-0.31%</span></span><span class="q"><span class="sym">IBIT</span>46.64 <span class="down">▼-1.04%</span></span><span class="q"><span class="sym">XLK</span>194.20 <span class="down">▼-1.06%</span></span><span class="q"><span class="sym">XLF</span>54.32 <span class="down">▼-0.91%</span></span><span class="q"><span class="sym">XLE</span>67.69 <span class="up">▲+0.73%</span></span><span class="q"><span class="sym">XLP</span>84.76 <span class="up">▲+0.68%</span></span></div></div>
 <main>
 <nav aria-label="Pages"><a href="index.html"><b>1</b>HOME</a><a href="portfolio.html"><b>2</b>PORT</a><a href="strategies.html"><b>3</b>STRAT</a><a href="scanner.html"><b>4</b>SCAN</a><a href="earnings.html"><b>5</b>EARN</a><a href="learning.html" aria-current="page"><b>6</b>LEARN</a><a href="invest.html"><b>7</b>INVEST</a></nav>
 <h1>What's Working</h1>
@@ -158,7 +172,7 @@ Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): 0.244. 
 <li>A change is adopted only if, on the latest ten sessions (data it was not fitted to), its daily top-five picks made more money than the weights in use.</li>
 <li>The original weights run alongside as a control. If the learned weights make less for two weekly checks running, they revert.</li>
 <li>Overlapping contracts on the same stock and day are not independent, so sample sizes overstate certainty; the minimums and small steps guard against learning noise.</li></ul></div>
-<div class="statusbar"><span><b>REGIME</b>RISK-OFF DEEPENING -1</span><span><b>MKT DIR</b>NEUTRAL +2</span><span><b>CORE ACCT</b>$856.15 <span class="down">-14.4%</span></span><span><b>OPEN</b>5</span><span><b>FLAGGED</b>1629</span></div>
+<div class="statusbar"><span><b>REGIME</b>RISK-OFF DEEPENING -3</span><span><b>MKT DIR</b>NEUTRAL +3</span><span><b>CORE ACCT</b>$853.15 <span class="down">-14.7%</span></span><span><b>OPEN</b>5</span><span><b>FLAGGED</b>788</span></div>
 <footer>Simulation for education only. Not financial advice, and not a record of real trades.</footer>
 </main><script>
 document.querySelectorAll('table.sortable').forEach(function(table){
@@ -176,6 +190,10 @@ function apply(){var shown=0;rows.forEach(function(r){var ok=(!t.value||r.datase
 n.textContent='Showing '+shown+' of '+rows.length}
 t.addEventListener('change',apply);b.addEventListener('change',apply);apply()})();
 
+document.querySelectorAll('[data-acct]').forEach(function(b){b.addEventListener('click',function(){
+document.querySelectorAll('details.acct').forEach(function(d){d.open=b.dataset.acct==='1'})})});
+function openAcct(){var d=location.hash&&document.querySelector('details.acct'+location.hash);if(d)d.open=true}
+window.addEventListener('hashchange',openAcct);openAcct();
 document.querySelectorAll('.rg-pane').forEach(function(p){
 var on={};p.querySelectorAll('button.rg-s').forEach(function(b){on[b.dataset.s]=true});
 function draw(){p.querySelectorAll('[data-s]').forEach(function(e){
