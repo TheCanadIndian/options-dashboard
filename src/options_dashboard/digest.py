@@ -316,7 +316,7 @@ def due() -> bool:
     """Once a market day, from DAILY_AT on."""
     now = datetime.now(data.NEW_YORK)
     return (data.market_open() and now.time() >= DAILY_AT
-            and (_seen().get("date") or "")[:10] != datetime.now().date().isoformat())
+            and _seen().get("daily_date", (_seen().get("date") or "")[:10]) != datetime.now().date().isoformat())
 
 
 if __name__ == "__main__":
@@ -340,5 +340,8 @@ if __name__ == "__main__":
     else:
         post(messages, url)
         SEEN.parent.mkdir(parents=True, exist_ok=True)
-        SEEN.write_text(json.dumps(keep | {"date": datetime.now().isoformat(timespec="minutes")}), encoding="utf-8")
+        stamp = {"date": datetime.now().isoformat(timespec="minutes"), "daily_date": _seen().get("daily_date")}
+        if "--daily" in sys.argv:  # only the scheduled post marks the day done; a test post does not
+            stamp["daily_date"] = datetime.now().date().isoformat()
+        SEEN.write_text(json.dumps(keep | stamp), encoding="utf-8")
         print(f"Digest posted to Discord ({len(messages)} messages)")
