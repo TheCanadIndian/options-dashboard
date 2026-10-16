@@ -50,8 +50,13 @@ the user's real money.
   before committing**. `site.publish()` already retries after a rebase.
 - Secrets live in GitHub Actions secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
   `DISPATCH_TOKEN` (a fine-grained PAT, Actions read/write, made Oct 2026 with about a year's
-  expiry: if scans stop, check it first), `STATE_TOKEN`. The repo variable `STATE_URL` is the
-  Worker's address.
+  expiry: if scans stop, check it first), `STATE_TOKEN`, `DISCORD_WEBHOOK` (the daily digest). The
+  repo variable `STATE_URL` is the Worker's address.
+- **Daily Discord digest** (`digest.py`): posted once each market day by the first scan at or after
+  10:00 New York (the first with live quotes): regime, pictures of the sector and Mag 7 rotation
+  maps, the next week's earnings with expectations and implied moves, contracts scoring 70+, and
+  the Roth shortlist's buy-area changes. No strategy-account trades (the user asked to leave them
+  out). Test it with the scan workflow's `digest_now` input.
 
 ## Code map (`src/options_dashboard/`)
 

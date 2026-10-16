@@ -7,7 +7,7 @@ import sys
 import time
 from datetime import datetime
 
-from . import alerts, config, data, journal, paper, portfolio, scanner, scorecard, site
+from . import alerts, config, data, digest, journal, paper, portfolio, scanner, scorecard, site
 
 market_open = data.market_open
 
@@ -44,6 +44,7 @@ def run_once(send_alerts: bool, log_paper: bool) -> None:
             card = scorecard.build(cfg, scanner.WEIGHTS, scanner.FULL_CONVICTION)
             print(f"Scorecard rebuilt: {card['tuning']['message']}")
         site.build(state, cfg, result)
+        digest.save_scan(result)
         if cfg["site_push"]:
             error = site.publish()
             if error:
