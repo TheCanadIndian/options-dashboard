@@ -28,6 +28,7 @@ TARGET_LEVELS = {
     "range_high": "Wyckoff range high", "range_low": "Wyckoff range low",
     "avwap_quarter": "quarter's anchored VWAP", "avwap_prev_quarter": "last quarter's anchored VWAP",
     "avwap_event": "volatility-event anchored VWAP", "avwap_major": "major-event anchored VWAP",
+    "mean20": "20-day average",
 }
 
 GAMMA_MAX_DTE = 45  # expiries this close carry most of the gamma
@@ -143,8 +144,11 @@ def _read_structure(ticker: str, ind: pd.DataFrame, bars: pd.DataFrame | None, s
         return structure.gamma(near, spot, rate, adv_dollars, trend, note, summary)
 
     atr = float(ind["atr"].iloc[-1])
+    auction_read = attempt(lambda: structure.auction(bars, atr)) if bars is not None else None
     return {
-        "auction": attempt(lambda: structure.auction(bars, atr)) if bars is not None else None,
+        "auction": auction_read,
+        "meanrev": attempt(lambda: structure.mean_reversion(ind, snap["trend"],
+                                                            (auction_read or {}).get("balanced"))),
         "gamma": attempt(dealer_exposure),
         "wyckoff": attempt(lambda: structure.wyckoff(ind)),
         "vpa": attempt(lambda: structure.vpa(ind)),

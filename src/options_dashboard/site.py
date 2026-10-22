@@ -157,7 +157,7 @@ main{padding:8px 10px 28px}nav a{padding:8px 9px}}
 
 METHOD_SHORT = {"auction": "Auction", "gamma": "Dealer flows", "wyckoff": "Wyckoff", "vpa": "VPA",
                 "avwap": "AVWAPs", "vol": "Vol surface", "sector": "Sector", "trend": "Trend",
-                "seasonal": "Seasonal"}
+                "seasonal": "Seasonal", "meanrev": "Mean reversion"}
 
 TABLE_JS = """
 document.querySelectorAll('table.sortable').forEach(function(table){

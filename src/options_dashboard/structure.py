@@ -23,13 +23,14 @@ from . import greeks, learning
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Share of the composite direction score each method contributes.
-METHOD_WEIGHTS = {"auction": 0.20, "gamma": 0.17, "wyckoff": 0.12, "vpa": 0.12, "avwap": 0.10, "vol": 0.08,
-                  "sector": 0.08, "trend": 0.08, "seasonal": 0.05}
+# Mean reversion took 8% when it was added (October 2026); the others were scaled down to make room.
+METHOD_WEIGHTS = {"auction": 0.184, "gamma": 0.156, "wyckoff": 0.11, "vpa": 0.11, "avwap": 0.092, "vol": 0.074,
+                  "sector": 0.074, "trend": 0.074, "seasonal": 0.046, "meanrev": 0.08}
 METHOD_NAMES = {
     "auction": "Auction / market profile", "gamma": "Dealer gamma, vanna, charm and customer DEX", "wyckoff": "Wyckoff",
     "vpa": "Volume price analysis", "avwap": "Anchored VWAPs (quarters and volatility events)",
     "vol": "Volatility skew and surface", "sector": "Sector rotation", "trend": "Trend and momentum",
-    "seasonal": "Seasonality",
+    "seasonal": "Seasonality", "meanrev": "Mean reversion",
 }
 
 
@@ -129,7 +130,80 @@ def auction(bars: pd.DataFrame, atr: float) -> dict[str, Any] | None:
     else:
         reasons.append("= Value is overlapping from week to week: the market is in balance")
 
-    return _out(score, reasons, poc=area["poc"], vah=area["vah"], val=area["val"])
+    return _out(score, reasons, poc=area["poc"], vah=area["vah"], val=area["val"], balanced=abs(shift) <= 0.5 * atr)
+
+
+# ---------------------------------------------------------------- mean reversion
+
+def _rsi(close: pd.Series, n: int) -> pd.Series:
+    change = close.diff()
+    gain = change.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    loss = (-change.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    return 100 - 100 / (1 + gain / loss.replace(0, np.nan))
+
+
+def mean_reversion(daily: pd.DataFrame, trend: float, balanced: bool | None) -> dict[str, Any] | None:
+    """How stretched price is from its mean, and whether this kind of market tends to snap back.
+
+    Stretch is measured four ways: distance from the 20-day average in ATRs, position in the
+    Bollinger bands, 2-day RSI, and closes in a row the same way. Stretched up scores bearish,
+    stretched down bullish. Context decides how much that counts: stretch reverts in a balanced
+    market (overlapping value) and when a pullback runs against a healthy trend, but in a strong
+    trend an extreme is usually continuation, so a stretch in the trend's own direction is mostly
+    ignored rather than faded.
+    """
+    if len(daily) < 60:
+        return None
+    close = daily["Close"]
+    price, atr = float(close.iloc[-1]), float(daily["atr"].iloc[-1])
+    mean20 = float(close.rolling(20).mean().iloc[-1])
+    if atr <= 0:
+        return None
+    stretch = (price - mean20) / atr
+    upper, lower = float(daily["bb_upper"].iloc[-1]), float(daily["bb_lower"].iloc[-1])
+    band = (price - lower) / (upper - lower) if upper > lower else 0.5
+    rsi2 = float(_rsi(close, 2).iloc[-1])
+    moves = np.sign(close.diff().iloc[-10:].to_numpy())
+    streak = 0
+    for m in moves[::-1]:
+        if m == 0 or (streak and np.sign(streak) != m):
+            break
+        streak += int(m)
+
+    # +1 is fully stretched up, -1 fully stretched down.
+    raw = (0.45 * np.clip(stretch / 3, -1, 1) + 0.25 * np.clip((rsi2 - 50) / 40, -1, 1)
+           + 0.15 * np.clip((band - 0.5) / 0.5, -1, 1) + 0.15 * np.clip(streak / 5, -1, 1))
+    reasons = [f"= {abs(stretch):.1f} ATR {'above' if stretch >= 0 else 'below'} the 20-day average (${mean20:.2f}); "
+               f"2-day RSI {rsi2:.0f}; {abs(streak)} close{'s' if abs(streak) != 1 else ''} in a row "
+               f"{'up' if streak > 0 else 'down' if streak < 0 else 'unchanged'}; "
+               f"{'above the upper' if band > 1 else 'below the lower' if band < 0 else 'inside the'} Bollinger band"]
+
+    with_trend = trend * raw > 0  # stretched the same way the trend points
+    if abs(trend) >= 60 and with_trend:
+        context = 0.25
+        reasons.append(f"= Strong trend ({trend:+.0f}): a stretch in its direction usually keeps going, so it is not faded")
+    elif abs(trend) >= 25 and not with_trend:
+        context = 1.2
+        reasons.append(f"= A pullback against the trend ({trend:+.0f}): the classic snap-back setup")
+    elif balanced:
+        context = 1.0
+        reasons.append("= Value is overlapping (balance): extremes tend to rotate back toward the middle")
+    else:
+        context = 0.6
+        reasons.append("= Neither balanced nor a pullback in a trend: stretch counts for less here")
+    # Small stretches fade in gradually instead of switching on at a threshold.
+    fade = min(abs(raw) / 0.25, 1.0) ** 2
+    score = float(np.clip(-raw * 100 * context * fade, -100, 100))
+    if abs(score) < 5:
+        reasons.append("= Not stretched far enough from its mean to matter")
+    elif abs(raw) < 0.25:
+        reasons.append(f"{'+' if score > 0 else '-'} Mildly stretched {'down' if score > 0 else 'up'}: a small lean "
+                       f"toward ${mean20:.2f}")
+    elif score > 0:
+        reasons.append(f"+ Stretched down: odds favour a bounce toward ${mean20:.2f}")
+    else:
+        reasons.append(f"- Stretched up: odds favour a pullback toward ${mean20:.2f}")
+    return _out(score, reasons, mean20=mean20, stretch_atr=stretch, rsi2=rsi2)
 
 
 # ---------------------------------------------------------------- volume price analysis

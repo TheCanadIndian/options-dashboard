@@ -433,7 +433,7 @@ def main() -> None:
 
     with trends_tab:
         short = {"auction": "Auction", "gamma": "Gamma", "wyckoff": "Wyckoff", "vpa": "VPA", "avwap": "AVWAP",
-                 "vol": "Vol", "sector": "Sector", "trend": "Trend", "seasonal": "Seasonal"}
+                 "vol": "Vol", "sector": "Sector", "trend": "Trend", "seasonal": "Seasonal", "meanrev": "Mean rev"}
         trend_df = pd.DataFrame([
             {"Ticker": t, "Price": r["spot"], "Read": r["trend"], "Bias": r["bias"].capitalize(),
              **{short[m["key"]]: m["score"] for m in r["methods"]},

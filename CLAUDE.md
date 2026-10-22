@@ -18,7 +18,8 @@ the user's real money.
 - **Methods they trust:** auction theory and market profile, volume price analysis, Wyckoff,
   dealer gamma (plus vanna and charm, with customer flow deciding which side holds open
   interest), skew and volatility surfaces, sector rotation, seasonality, AVWAPs anchored at
-  quarters and volatility events, regime changes.
+  quarters and volatility events, regime changes, and mean reversion (added Oct 2026: it fades
+  stretches in balance and buys pullbacks in trends, but never fades a strong trend's own direction).
 - **Grade on profit**, in dollars per contract, not on statistical fit.
 - **Swings first.** Weeklies and same-day gamma trades are welcome as separate experiments.
 - **Roth IRA (Schwab, started with $500, adds money occasionally): research only.** The Invest

@@ -61,7 +61,13 @@ def _save(state: dict[str, Any]) -> None:
 def active(kind: str, base: dict[str, float]) -> dict[str, float]:
     """The weights in use for `kind` ("factors" or "methods"): learned ones, or `base`."""
     learned = _state().get(kind)
-    return dict(learned) if learned and set(learned) == set(base) else dict(base)
+    if not learned:
+        return dict(base)
+    if set(learned) == set(base):
+        return dict(learned)
+    merged = {k: learned.get(k, base[k]) for k in base}  # a method added since learning started
+    scale = sum(base.values()) / sum(merged.values())
+    return {k: v * scale for k, v in merged.items()}
 
 
 def log() -> list[dict[str, Any]]:
