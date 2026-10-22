@@ -33,6 +33,8 @@ jobs:
       - name: Pull state
         id: pull
         run: uv run python -m options_dashboard.cloudstate pull
+      - name: Backfill new methods into the journal
+        run: uv run python -m options_dashboard.backfill
       - name: Research
         run: |
           git config user.name "options-scanner"
