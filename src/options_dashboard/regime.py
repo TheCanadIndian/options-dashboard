@@ -240,6 +240,8 @@ def read(breadth: float | None = None, breadth_change: float | None = None) -> d
         "breadth": breadth, "breadth_change": breadth_change,
         "vix": [float(px["^VIX"].iloc[-1]), float(px["^VIX"].iloc[-2])],
         "path": [[str(d.date()), float(v)] for d, v in path.items() if pd.notna(v)],
+        "spy_path": [float(px["SPY"].asof(d)) if pd.notna(px["SPY"].asof(d)) else None
+                     for d, v in path.items() if pd.notna(v)],
     }
 
 

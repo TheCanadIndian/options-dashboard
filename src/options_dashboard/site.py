@@ -127,6 +127,11 @@ font-size:11.5px;white-space:nowrap;display:none}
 border:1px solid var(--border);font-size:11.5px;color:var(--ink2)}
 .statusbar b{color:var(--amber);font-weight:600;margin-right:4px}
 footer{margin-top:8px;color:var(--muted);font-size:11px}
+.overlay-toggle{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--ink2);border:1px solid var(--border);
+padding:5px 10px;min-height:30px;cursor:pointer;margin:0 0 6px;letter-spacing:.04em}
+.overlay-toggle i{display:inline-block;width:9px;height:9px;margin-right:6px;opacity:.4}
+.overlay-toggle[aria-pressed=true]{border-color:var(--s1);color:var(--ink)}.overlay-toggle[aria-pressed=true] i{opacity:1}
+.overlay-toggle::before{content:"+ ";color:var(--amber)}.overlay-toggle[aria-pressed=true]::before{content:"✓ "}
 .rg-toggle{display:flex;gap:0;margin:0 0 10px}
 .rg-toggle input{position:absolute;opacity:0;pointer-events:none}
 .rg-toggle label{padding:7px 14px;min-height:32px;border:1px solid var(--border);background:#0d0d0c;color:var(--ink2);
@@ -183,7 +188,7 @@ function move(e){var r=svg.getBoundingClientRect(),cx=(e.touches?e.touches[0].cl
 vw=svg.viewBox.baseVal.width,vx=cx/r.width*vw,best=0,gap=1e9;for(var i=0;i<d.length;i++){var g=Math.abs(d[i][0]-vx);if(g<gap){gap=g;best=i}}
 var p=d[best];line.setAttribute('x1',p[0]);line.setAttribute('x2',p[0]);dot.setAttribute('cx',p[0]);
 dot.setAttribute('cy',p[1]);line.style.display=dot.style.display='';tip.style.display='block';
-tip.innerHTML='<b>'+p[3]+'</b><br>'+p[2];var x=p[0]/vw*r.width;
+var ov=svg.querySelector('.overlay');tip.innerHTML='<b>'+p[3]+'</b><br>'+p[2]+(p[4]&&ov&&ov.style.display!=='none'?'<br>'+p[4]:'');var x=p[0]/vw*r.width;
 tip.style.left=Math.min(Math.max(x-tip.offsetWidth/2,0),r.width-tip.offsetWidth)+'px';
 tip.style.top=Math.max(p[1]/260*r.height-tip.offsetHeight-12,0)+'px'}
 function out(){line.style.display=dot.style.display='none';tip.style.display='none'}
@@ -230,9 +235,12 @@ def _thin(ticks: list, most: int) -> list:
 
 def _line_chart(values: list[float], hover_labels: list[str], hover_values: list[str], ticks: list[tuple[int, str]],
                 axis_format, baseline: float, baseline_label: str, aria: str, pad_floor: float,
-                width: int = 800) -> str:
-    """One-series line chart with a dashed reference line and a hover crosshair (see CHART_JS)."""
-    W, H, L, R, T, B = width, 260, 56, 12, 12, 28
+                width: int = 800, overlay: tuple[str, list[float | None]] | None = None) -> str:
+    """One-series line chart with a dashed reference line and a hover crosshair (see CHART_JS).
+
+    `overlay` is (name, values aligned with `values`): a second line on its own scale, labelled
+    on the right, drawn hidden and shown by the chart's toggle button (see OVERLAY_JS)."""
+    W, H, L, R, T, B = width, 260, 56, (58 if overlay else 12), 12, 28
     lo, hi = min(values + [baseline]), max(values + [baseline])
     pad = max((hi - lo) * 0.15, pad_floor)
     lo, hi = lo - pad, hi + pad
@@ -253,12 +261,36 @@ def _line_chart(values: list[float], hover_labels: list[str], hover_values: list
     path = " ".join(f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}" for i, v in enumerate(values))
     data = [[round(x(i), 1), round(y(v), 1), hover_values[i], hover_labels[i]] for i, v in enumerate(values)]
     base = y(baseline)
+    extra, toggle = "", ""
+    if overlay:
+        name, series = overlay
+        known = [v for v in series if v is not None]
+        if known:
+            olo, ohi = min(known), max(known)
+            opad = (ohi - olo) * 0.08 or 1.0
+            olo, ohi = olo - opad, ohi + opad
+
+            def oy(v: float) -> float:
+                return T + (H - T - B) * (1 - (v - olo) / (ohi - olo))
+
+            opath = " ".join(f"{'M' if i == 0 or series[i - 1] is None else 'L'}{x(i):.1f},{oy(v):.1f}"
+                             for i, v in enumerate(series) if v is not None)
+            labels = "".join(f'<text x="{W - R + 6}" y="{oy(olo + (ohi - olo) * k / 4) + 4:.1f}">'
+                             f'{olo + (ohi - olo) * k / 4:,.0f}</text>' for k in range(5))
+            extra = (f'<g class="overlay" style="display:none" fill="var(--s1)">{labels}'
+                     f'<path d="{opath}" fill="none" stroke="var(--s1)" stroke-width="1.6" stroke-linejoin="round" '
+                     f'opacity=".9"/></g>')
+            for i, row in enumerate(data):  # the hover tip shows the overlay's value too, when it is on
+                if series[i] is not None:
+                    row.append(f"{name} {series[i]:,.2f}")
+            toggle = (f'<button type="button" class="overlay-toggle" aria-pressed="false">'
+                      f'<i style="background:var(--s1)"></i>{escape(name)}</button>')
     return (
-        f'<div class="linechart" data-points="{escape(json.dumps(data))}">'
+        f'{toggle}<div class="linechart" data-points="{escape(json.dumps(data))}">'
         f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(aria)}" font-size="13" fill="var(--muted)">'
         f'{grid}{tick_html}'
         f'<line x1="{L}" x2="{W - R}" y1="{base:.1f}" y2="{base:.1f}" stroke="var(--axis)" stroke-dasharray="4 4"/>'
-        f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">{escape(baseline_label)}</text>'
+        f'<text x="{W - R}" y="{base - 5:.1f}" text-anchor="end">{escape(baseline_label)}</text>{extra}'
         f'<path d="{path}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>'
         f'<line class="xh" y1="{T}" y2="{H - B}" stroke="var(--axis)" style="display:none"/>'
         f'<circle class="xd" r="5" fill="var(--series)" stroke="var(--surface)" stroke-width="2" style="display:none"/>'
@@ -530,6 +562,10 @@ def _load_chrome() -> None:
 
 
 RG_JS = """
+document.querySelectorAll('.overlay-toggle').forEach(function(b){b.addEventListener('click',function(){
+var on=b.getAttribute('aria-pressed')!=='true';
+document.querySelectorAll('.overlay-toggle').forEach(function(x){x.setAttribute('aria-pressed',on?'true':'false')});
+document.querySelectorAll('.overlay').forEach(function(g){g.style.display=on?'':'none'})})});
 document.querySelectorAll('[data-acct]').forEach(function(b){b.addEventListener('click',function(){
 document.querySelectorAll('details.acct').forEach(function(d){d.open=b.dataset.acct==='1'})})});
 function openAcct(){var d=location.hash&&document.querySelector('details.acct'+location.hash);if(d)d.open=true}
@@ -1274,10 +1310,13 @@ def _regime_section(model: dict[str, Any] | None, limits: tuple[int, int, str | 
             if d[:7] not in seen:
                 seen.add(d[:7])
                 months.append((i, datetime.fromisoformat(d).strftime("%b")))
+        spy = model.get("spy_path")
+        overlay = ("SPY", spy) if spy and len(spy) == len(path) else None
+
         def draw(width: int, most: int) -> str:
-            return _line_chart([v for _, v in path], [_day(d) for d, _ in path], [f"{v:+.0f}" for _, v in path],
+            return _line_chart([v for _, v in path], [_day(d) for d, _ in path], [f"Risk {v:+.0f}" for _, v in path],
                                _thin(months, most), lambda v: f"{v:+.0f}", 0.0, "Neutral",
-                               "Risk score over the past year", 5.0, width)
+                               "Risk score over the past year", 5.0, width, overlay)
 
         chart = _both(draw(800, 12), draw(420, 6))
 
