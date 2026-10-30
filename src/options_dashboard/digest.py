@@ -231,23 +231,23 @@ def _earnings(scan: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------- 3. contracts scoring 70+
 
 def _contracts(scan: dict[str, Any]) -> dict[str, Any]:
-    def line(r: dict[str, Any]) -> str:
+    """One contract per ticker: the highest-scoring one, which is always in the direction the model
+    expects (calls when its read is bullish, puts when bearish)."""
+    best: dict[str, dict[str, Any]] = {}
+    for r in scan.get("swing", []):  # already sorted best first
+        best.setdefault(r["ticker"], r)
+    lines = []
+    for r in sorted(best.values(), key=lambda r: -r["score"])[:15]:
         exp = date.fromisoformat(r["expiration"])
-        warn = " ⚠ earnings before expiry" if r["earnings"] else ""
-        return (f"**{r['score']:.0f}** · {r['ticker']} ${r['strike']:g} {r['type']} {exp:%b} {exp.day} ({r['dte']}d) · "
-                f"ask ${r['ask']:.2f} (${r['ask'] * 100:,.0f}) · Δ {r['delta']:+.2f} · IV {r['iv']:.0%} · "
-                f"needs {r['breakeven_move']:.1%} · spread {r['spread_pct']:.0f}%{warn}")
-
-    swing, short = scan.get("swing", []), scan.get("short", [])
-    parts = []
-    if swing:
-        parts.append(f"**Swing (21-90 days): {len(swing)} at {MIN_SCORE}+**\n" + "\n".join(line(r) for r in swing[:12]))
-    if short:
-        parts.append(f"**Short-dated (0-14 days): {len(short)} at {MIN_SCORE}+**\n" + "\n".join(line(r) for r in short[:6]))
-    text = "\n\n".join(parts) or f"No contracts scored {MIN_SCORE} or more on the last scan."
+        way = "▲ Bullish → buy call" if r["type"] == "call" else "▼ Bearish → buy put"
+        warn = " · ⚠ earnings before expiry" if r["earnings"] else ""
+        lines.append(f"**{r['ticker']}** {way}: ${r['strike']:g} {exp:%b} {exp.day} ({r['dte']}d) · ask ${r['ask']:.2f} "
+                     f"(${r['ask'] * 100:,.0f}) · score {r['score']:.0f} · needs {r['breakeven_move']:.1%}{warn}")
+    text = "\n".join(lines) or f"No contract scored {MIN_SCORE} or more on the last scan."
     if scan.get("time"):
-        text += f"\n\nFrom the scan at {scan['time'][11:16]} ET. Buy to open only; prices are 15 minutes delayed."
-    return {"title": f"Contracts scoring {MIN_SCORE}+", "description": text[:4000], "color": AMBER}
+        text += (f"\n\nBest contract per ticker from the {scan['time'][11:16]} ET scan, scored {MIN_SCORE}+. "
+                 "Buy to open only; prices are 15 minutes delayed.")
+    return {"title": "Today's contract per ticker", "description": text[:4000], "color": AMBER}
 
 
 def _zerodte() -> dict[str, Any]:
