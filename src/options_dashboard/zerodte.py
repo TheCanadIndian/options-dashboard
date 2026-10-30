@@ -56,6 +56,12 @@ VARIANTS = [
      "cap": 1.50, "target": 2.0, "strategy": "trend"},
     {"id": "trend_spy40_gamma", "name": "Trend day: SPY, up to $40, dealers short gamma", "ticker": "SPY",
      "cap": 0.40, "target": 2.0, "strategy": "trend", "short_gamma": True},
+    # Market profile setups at 10:30 (daycall.profile_1030): the 80% rule and a reclaimed gap down,
+    # sold when the underlying reaches the setup's level (the far side of value), otherwise at the close.
+    {"id": "profile_spx150", "name": "Market profile: SPX, up to $150", "ticker": "SPX", "cap": 1.50,
+     "strategy": "profile"},
+    {"id": "profile_spy40", "name": "Market profile: SPY, up to $40", "ticker": "SPY", "cap": 0.40,
+     "strategy": "profile"},
 ]
 UPDATE_FROM, UPDATE_UNTIL = clock(10, 30), clock(10, 45)  # once the first hour is complete
 TREND_FROM, TREND_UNTIL = clock(10, 45), clock(11, 0)  # the 10:45 scan's delayed chain shows about 10:30
@@ -283,9 +289,59 @@ def make_update(state: dict[str, Any]) -> list[str]:
         lines.append(f"Trend-day setup: a strong first hour closing near its {'high' if fh['h1_ret'] > 0 else 'low'}; "
                      + ("dealers are short gamma, so hedging should chase it" if gamma else
                         "dealers are not short gamma, so the move has less fuel" if gamma is False else "gamma unknown"))
+    try:
+        pr = daycall.profile_1030()
+        day["profile"] = pr
+        lines.append("Market profile: " + daycall.describe_profile(pr))
+    except Exception:
+        pass
     lines.append("Paper-tested in the 0DTE lab; research, not advice.")
     _post_discord("⏱ 10:30 update", "\n".join(lines))
     return [f"10:30 update: {u['p_up']:.0%} up from {u['price']:.2f}"]
+
+
+def _nearest_otm(ticker: str, up: bool, cap: float) -> tuple[pd.Series, float] | None:
+    """The nearest out-of-the-money 0DTE contract within the cap, and the underlying it was quoted against."""
+    try:
+        chain = _today_chain(ticker)
+        ref = float(data.cboe_chain(SOURCES[ticker][1])[1].get("price"))
+    except Exception:
+        return None
+    side = chain[(chain["type"] == ("call" if up else "put"))
+                 & ((chain["strike"] > ref) if up else (chain["strike"] < ref)) & (chain["ask"] <= cap)]
+    if side.empty:
+        return None
+    return side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0], ref
+
+
+def enter_profile(state: dict[str, Any]) -> list[str]:
+    """From the 10:45 scan: when a market profile setup is live, buy each profile variant's contract."""
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    day = state.get("calls", {}).get(today) or {}
+    pr = day.get("profile") or {}
+    s = pr.get("setup")
+    if not s or day.get("profile_entered"):
+        return []
+    day["profile_entered"] = True
+    up = s["direction"] == "up"
+    notes = []
+    for v in (x for x in VARIANTS if x.get("strategy") == "profile"):
+        got = _nearest_otm(v["ticker"], up, v["cap"])
+        if not got:
+            continue
+        pick, ref = got
+        # The level is set on SPY; scale it to the index for SPX.
+        level = ref * s["target"] / pr["price"] if s.get("target") else None
+        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if up else "put",
+                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
+                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
+                                "target_level": level, "why": f"{s['name']}: {s['why']}",
+                                "status": "open", "opened": datetime.now().isoformat(timespec="minutes")})
+        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {'call' if up else 'put'} at ${pick['ask']:.2f}"
+                     + (f", sell at {level:,.2f}" if level else ", hold to the close"))
+    if notes:
+        _post_discord(f"📊 Market profile trade (paper): {s['name']}", "\n".join(notes))
+    return notes
 
 
 def enter_trend(state: dict[str, Any]) -> list[str]:
@@ -305,16 +361,10 @@ def enter_trend(state: dict[str, Any]) -> list[str]:
     for v in (x for x in VARIANTS if x.get("strategy") == "trend"):
         if v.get("short_gamma") and gamma is not True:
             continue
-        try:
-            chain = _today_chain(v["ticker"])
-            ref = float(data.cboe_chain(SOURCES[v["ticker"]][1])[1].get("price"))
-        except Exception:
+        got = _nearest_otm(v["ticker"], up, v["cap"])
+        if not got:
             continue
-        side = chain[(chain["type"] == ("call" if up else "put"))
-                     & ((chain["strike"] > ref) if up else (chain["strike"] < ref)) & (chain["ask"] <= v["cap"])]
-        if side.empty:
-            continue
-        pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
+        pick, ref = got
         state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if up else "put",
                                 "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
                                 "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
@@ -383,7 +433,7 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
     out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0,
            "update": 0, "update_right": 0, "update_confident": 0, "update_confident_right": 0,
-           "up_calls": 0, "up_right": 0, "down_calls": 0, "down_right": 0, "range": {}}
+           "up_calls": 0, "up_right": 0, "down_calls": 0, "down_right": 0, "range": {}, "profile": {}}
     for day in state.get("calls", {}).values():
         for name in ("SPY",):  # the call is measured on SPY's real open (the index's open is stale)
             c = day.get(name) or {}
@@ -402,6 +452,14 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
                 b = out["range"].setdefault(c["range"], {"days": 0, "move": 0.0})
                 b["days"] += 1
                 b["move"] += abs(c["close"] / c["open"] - 1)
+        s = (day.get("profile") or {}).get("setup") or {}
+        if "outcome" in s:
+            b = out["profile"].setdefault(s["name"], {"days": 0, "right": 0, "targets": 0, "reached": 0})
+            b["days"] += 1
+            b["right"] += s["direction"] == s["outcome"]
+            if s.get("reached") is not None:
+                b["targets"] += 1
+                b["reached"] += s["reached"]
         u = day.get("update") or {}
         if "outcome" in u:
             r = u["direction"] == u["outcome"]
@@ -434,6 +492,22 @@ def score_calls(state: dict[str, Any]) -> None:
                 state["observe"][d].update(open=float(bar["Open"]), high=float(bar["High"]),
                                            low=float(bar["Low"]), close=float(bar["Close"]))
     for d, day in state.get("calls", {}).items():
+        pr = day.get("profile") or {}
+        s = pr.get("setup")
+        if s and "outcome" not in s and not (pd.Timestamp(d).date() == now.date() and now.time() < clock(16, 5)):
+            try:
+                m5 = data.call(yf.Ticker("SPY").history, period="60d", interval="5m")
+                m5.index = m5.index.tz_convert("America/New_York")
+                rest = m5[(m5.index.date == pd.Timestamp(d).date()) & (m5.index.hour * 60 + m5.index.minute >= 630)
+                          & (m5.index.hour < 16)]
+                if len(rest):
+                    up = s["direction"] == "up"
+                    close = float(rest["Close"].iloc[-1])
+                    s.update(close=close, outcome="up" if close > pr["price"] else "down",
+                             reached=None if not s.get("target") else bool(
+                                 rest["High"].max() >= s["target"] if up else rest["Low"].min() <= s["target"]))
+            except Exception:
+                pass
         u = day.get("update")
         if u and "outcome" not in u and not (pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date()
                                                and datetime.now(data.NEW_YORK).time() < clock(16, 5)):
@@ -466,17 +540,24 @@ def manage(state: dict[str, Any]) -> list[str]:
     open_trades = [t for t in state["trades"] if t["status"] == "open"]
     if not open_trades:
         return notes
-    chains: dict[str, pd.DataFrame] = {}
+    chains: dict[str, tuple[pd.DataFrame, dict]] = {}
     for t in open_trades:
         v = next(x for x in VARIANTS if x["id"] == t["variant"])
         if t["date"] == now.date().isoformat() and now.time() < clock(16, 30):
-            try:  # the snapshot after entry (about 3:45 with the delay): did it reach the target?
-                chains.setdefault(t["ticker"], _today_chain(t["ticker"]))
-                q = chains[t["ticker"]][chains[t["ticker"]]["contractSymbol"] == t["symbol"]]
+            try:  # each later snapshot (15 minutes delayed): did it reach the target?
+                chains.setdefault(t["ticker"], data.cboe_chain(SOURCES[t["ticker"]][1]))
+                chain, quote = chains[t["ticker"]]
+                q = chain[chain["contractSymbol"] == t["symbol"]]
             except Exception:
-                q = pd.DataFrame()
-            if not q.empty and float(q["bid"].iloc[0]) >= t["entry"] * v["target"]:
-                bid = float(q["bid"].iloc[0])
+                q, quote = pd.DataFrame(), {}
+            if q.empty:
+                continue
+            bid, spot = float(q["bid"].iloc[0]), quote.get("price")
+            if t.get("target_level"):  # profile trades: the underlying reached the setup's level
+                hit = spot is not None and (spot >= t["target_level"] if t["type"] == "call" else spot <= t["target_level"])
+            else:
+                hit = bool(v.get("target")) and bid >= t["entry"] * v["target"]
+            if hit and bid > 0:
                 t.update(status="closed", exit=bid, how=f"target hit (bid ${bid:.2f})",
                          pnl=round((bid - t["entry"]) * 100 - 2 * FEES[t["ticker"]], 2))
                 notes.append(f"{v['name']}: target hit, +${t['pnl']:.0f}")
@@ -529,6 +610,7 @@ def run() -> list[str]:
                 notes.append(f"10:30 update not made ({type(exc).__name__})")
         if TREND_FROM <= now.time() < TREND_UNTIL:
             notes += enter_trend(state)
+            notes += enter_profile(state)
         if ENTRY_FROM <= now.time() < ENTRY_UNTIL:
             notes += enter(state)
     notes += manage(state)

@@ -76,6 +76,13 @@ the user's real money.
   day travels (reported in the 10:30 update); breakouts of the first-hour range, measured from the break,
   are a coin flip. Factors with no free history (SPY gamma, customer delta, breadth, method scores) are
   logged every scan in `paper/zerodte.json` under `observe`; test them with `zerodte --observations`.
+  Market profile (`daycall.profile_1030`, 30-minute TPO of yesterday): at 10:30 the 80% rule (opened outside
+  value, back inside it: target the far side of value, reached 66% of 90 days in 2024-26 against ~53% for
+  ordinary days the same distance away; it does not carry to the close) and a gap down reclaimed into
+  yesterday's range (69% closed above 10:30, 39 days). Posted in the 10:30 update, traded by the profile
+  variants (sold when the underlying reaches the level), scored daily. Yesterday's profile shape (P, b, D,
+  trend) predicted nothing. Yahoo keeps 30-minute bars only 60 days, so the long test used hourly volume
+  profiles (95% the same setups).
 
 ## Code map (`src/options_dashboard/`)
 

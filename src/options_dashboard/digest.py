@@ -302,6 +302,9 @@ def _day_call() -> dict[str, Any]:
         if s["update"]:
             lines.append(f"10:30 updates: confident {s['update_confident_right']} of {s['update_confident']} right; "
                          f"all {s['update_right']} of {s['update']}")
+        for name, b in s.get("profile", {}).items():
+            lines.append(f"Market profile, {name}: closed the right way {b['right']} of {b['days']}"
+                         + (f"; reached its level {b['reached']} of {b['targets']}" if b["targets"] else ""))
         if s["up_calls"] or s["down_calls"]:
             lines.append(f"Up calls {s['up_right']} of {s['up_calls']} right; down calls {s['down_right']} of "
                          f"{s['down_calls']} right")
