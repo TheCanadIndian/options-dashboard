@@ -40,6 +40,9 @@ jobs:
           git config user.name "options-scanner"
           git config user.email "options-scanner@users.noreply.github.com"
           uv run python -m options_dashboard.longterm --publish
+      - name: Settle the 0DTE lab
+        continue-on-error: true
+        run: uv run python -m options_dashboard.zerodte
       - name: Push state
         if: always() && steps.pull.outcome == 'success'
         run: uv run python -m options_dashboard.cloudstate push

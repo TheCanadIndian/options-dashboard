@@ -81,7 +81,9 @@ def save_scan(result: dict[str, Any]) -> None:
             earnings.append({k: o.get(k) for k in ("ticker", "date", "timing", "eps_estimate", "eps_year_ago",
                                                     "revenue_estimate", "implied_move", "historical_move", "lean",
                                                     "beat_probability", "analysts")})
+    spy = (result["tickers"].get("SPY") or {}).get("levels") or {}
     out = {"time": result["scanned_at"].isoformat(timespec="minutes"), "swing": rows(result["contracts"]),
+           "spy_gamma": {k: spy.get(k) for k in ("net_gex", "flip", "call_wall", "put_wall")},
            "short": rows(result.get("short_contracts")), "earnings": earnings}
     LAST_SCAN.parent.mkdir(parents=True, exist_ok=True)
     LAST_SCAN.write_text(json.dumps(out, default=float), encoding="utf-8")
@@ -248,6 +250,26 @@ def _contracts(scan: dict[str, Any]) -> dict[str, Any]:
     return {"title": f"Contracts scoring {MIN_SCORE}+", "description": text[:4000], "color": AMBER}
 
 
+def _zerodte() -> dict[str, Any]:
+    """The 0DTE lab's forward test: results per variant and the last trading day's trades."""
+    from . import zerodte
+    state = zerodte.load()
+    lines = []
+    for s in zerodte.summary(state):
+        avg = "n/a" if s["avg"] is None else f"${s['avg']:+.0f}"
+        lines.append(f"**{s['name']}**: {s['trades']} trades, {s['wins']} won, avg {avg}, total ${s['total']:+,.0f}")
+    days = sorted(state["days"])
+    if days:
+        last = days[-1]
+        trades = [t for t in state["trades"] if t["date"] == last]
+        lines.append(f"\n**{last}:** " + ("; ".join(
+            f"{t['variant']} {t['ticker']} {t['strike']:g} {t['type']} at ${t['entry']:.2f} → "
+            + (f"{'+' if t['pnl'] >= 0 else '-'}${abs(t['pnl']):.0f}" if t["status"] == "closed" else "open")
+            for t in trades) or "no signal"))
+    lines.append("Forward test at real prices of the 3:30 PM momentum rule; paper only.")
+    return {"title": "0DTE lab (end-of-day momentum)", "description": "\n".join(lines)[:4000], "color": AMBER}
+
+
 # ---------------------------------------------------------------- 4. Roth research
 
 def _invest(seen: dict[str, Any], keep: dict[str, Any]) -> dict[str, Any] | None:
@@ -290,7 +312,7 @@ def build(cfg: dict[str, Any]) -> tuple[list[tuple[dict[str, Any], dict[str, byt
     messages = [
         ({"content": f"**📊 Daily digest · {day:%A, %B} {day.day}**", "embeds": market}, files),
         ({"embeds": [_earnings(scan)]}, {}),
-        ({"embeds": [_contracts(scan)]}, {}),
+        ({"embeds": [_contracts(scan), _zerodte()]}, {}),
         ({"embeds": ([invest] if invest else []) + [footer]}, {}),
     ]
     for m, _ in messages:

@@ -1538,6 +1538,36 @@ def _trade(pos: dict[str, Any], commission: float) -> str:
             f'<div><span>Take profit</span><b>{take}</b></div></div>{_review(pos)}{_reasoning(pos, False)}</div>')
 
 
+def _zerodte_section() -> str:
+    """The 0DTE lab: the forward test of the end-of-day momentum rule at real prices."""
+    from . import zerodte
+    state = zerodte.load()
+    rows = "".join(
+        f'<tr>{_cell(s["name"], escape(s["name"]), False)}{_cell(s["trades"], str(s["trades"]))}'
+        f'{_cell(s["wins"], f"{s["wins"]} of {s["trades"]}" if s["trades"] else "–")}'
+        f'{_cell(s["avg"] or 0, _signed(s["avg"]) if s["avg"] is not None else "–")}'
+        f'{_cell(s["total"], _signed(s["total"]))}{_cell(s["checked"], str(s["checked"]))}</tr>'
+        for s in zerodte.summary(state))
+    recent = "".join(
+        f'<tr><td class="num">{escape(t["date"])}</td><td>{escape(t["variant"])}</td>'
+        f'<td>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</td><td class="num">{_money(t["entry"])}</td>'
+        f'<td>{escape(t.get("how", "open"))}</td>'
+        f'<td class="num">{_signed(t["pnl"]) if t["status"] == "closed" else "open"}</td></tr>'
+        for t in reversed(state["trades"][-15:]))
+    return (
+        '<h2>0DTE lab: end-of-day momentum, forward test</h2>'
+        '<p class="small">The rule from the backtest: at 3:30 PM, if the index is above every high from 9:30 to 2:30 and '
+        'above the open, buy the nearest out-of-the-money call within the price cap (below the range and the open, a put); '
+        'sell at 3x or hold to the close. It made money in every year of the 2023-2026 backtest on SPX but depended on what '
+        'last-half-hour options really cost, so the lab buys the real contract at its real ask each day it fires. '
+        'One contract per variant, paper only. SPY showed no edge in the backtest and is here to confirm it.</p>'
+        f'<div class="panel scroll"><table><thead><tr><th>Variant</th><th>Trades</th><th>Won</th><th>Average</th>'
+        f'<th>Total</th><th>Days checked</th></tr></thead><tbody>{rows}</tbody></table></div>'
+        + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
+           f'<th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
+           '<p class="muted small">No trades yet: the rule fires on roughly one day in four.</p>'))
+
+
 def render_strategies(cfg: dict[str, Any]) -> str:
     accounts = portfolio.accounts(cfg)
     states = {a["id"]: portfolio.load(portfolio.account_cfg(cfg, a["id"]), a["id"]) for a in accounts}
@@ -1595,6 +1625,7 @@ def render_strategies(cfg: dict[str, Any]) -> str:
 
     body = f"""<h2>Leaderboard</h2>{table}
 <h2>Value over time</h2><div class="panel">{chart}</div>
+{_zerodte_section()}
 <h2>Each strategy</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(cards)}</div>
 <p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the

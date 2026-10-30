@@ -39,6 +39,9 @@ jobs:
       - name: Pull state
         id: pull
         run: uv run python -m options_dashboard.cloudstate pull
+      - name: 0DTE lab
+        continue-on-error: true  # the lab must never stop a scan
+        run: uv run python -m options_dashboard.zerodte
       - name: Scan
         run: |
           git config user.name "options-scanner"
