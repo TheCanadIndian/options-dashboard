@@ -81,13 +81,33 @@ def save_scan(result: dict[str, Any]) -> None:
             earnings.append({k: o.get(k) for k in ("ticker", "date", "timing", "eps_estimate", "eps_year_ago",
                                                     "revenue_estimate", "implied_move", "historical_move", "lean",
                                                     "beat_probability", "analysts")})
-    spy = (result["tickers"].get("SPY") or {}).get("levels") or {}
+    spy_info = result["tickers"].get("SPY") or {}
+    spy = spy_info.get("levels") or {}
     out = {"time": result["scanned_at"].isoformat(timespec="minutes"), "swing": rows(result["contracts"]),
-           "spy_gamma": {k: spy.get(k) for k in ("net_gex", "flip", "call_wall", "put_wall")},
-           "spy_read": {k: (result["tickers"].get("SPY") or {}).get(k) for k in ("trend", "bias")},
+           "spy_gamma": {k: spy.get(k) for k in ("net_gex", "flip", "call_wall", "put_wall", "vanna_flow",
+                                                 "vanna_realised", "charm_flow", "customer_dex", "coverage")},
+           "spy_read": {k: spy_info.get(k) for k in ("trend", "bias", "spot")},
+           "spy_methods": {m["key"]: m["score"] for m in spy_info.get("methods", [])},
+           "breadth": _breadth(result["tickers"]),
            "short": rows(result.get("short_contracts")), "earnings": earnings}
     LAST_SCAN.parent.mkdir(parents=True, exist_ok=True)
     LAST_SCAN.write_text(json.dumps(out, default=float), encoding="utf-8")
+
+
+def _breadth(tickers: dict[str, Any]) -> dict[str, Any] | None:
+    """A stand-in for market internals: of the scanned tickers with a bar for today, the share up on
+    the day, the share above today's open, and the share the dashboard reads bullish and bearish."""
+    up = above_open = n = bull = bear = 0
+    for info in tickers.values():
+        ind = info.get("indicators")
+        if ind is None or len(ind) < 2 or ind.index[-1].date() != datetime.now(data.NEW_YORK).date():
+            continue
+        n += 1
+        up += ind["Close"].iloc[-1] > ind["Close"].iloc[-2]
+        above_open += ind["Close"].iloc[-1] > ind["Open"].iloc[-1]
+        bull += info.get("bias") == "bullish"
+        bear += info.get("bias") == "bearish"
+    return {"tickers": n, "up": up / n, "above_open": above_open / n, "bullish": bull / n, "bearish": bear / n} if n else None
 
 
 def _last_scan() -> dict[str, Any]:

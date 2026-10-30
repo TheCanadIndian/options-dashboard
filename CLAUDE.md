@@ -70,6 +70,12 @@ the user's real money.
   Both came from backtests (Dec 2023 - Oct 2026) whose small edges vanished if real option prices were 15%
   higher than modelled, so they are not to be presented as proven until the lab's real-price record says so.
   SPY showed no edge in either. The user caps 0DTE contracts at $150.
+  An exhaustive search (Oct 2026: 153 pre-open signals including overseas markets, many models, a locked
+  2022-26 holdout) found nothing better than the live model; overseas data must use each exchange's local
+  date or the next session leaks in. Intraday, the first hour's width predicts how far the rest of the
+  day travels (reported in the 10:30 update); breakouts of the first-hour range, measured from the break,
+  are a coin flip. Factors with no free history (SPY gamma, customer delta, breadth, method scores) are
+  logged every scan in `paper/zerodte.json` under `observe`; test them with `zerodte --observations`.
 
 ## Code map (`src/options_dashboard/`)
 

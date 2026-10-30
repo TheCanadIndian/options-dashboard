@@ -15,6 +15,7 @@ Several variants run side by side so evidence builds faster (see VARIANTS). One 
 
     python -m options_dashboard.zerodte            # enter at 3:45-4:00, otherwise manage and settle
     python -m options_dashboard.zerodte --report   # print the results so far
+    python -m options_dashboard.zerodte --observations   # test the logged gamma, flow and breadth
 """
 
 from __future__ import annotations
@@ -325,6 +326,59 @@ def enter_trend(state: dict[str, Any]) -> list[str]:
     return notes
 
 
+def observe(state: dict[str, Any]) -> None:
+    """Log each scan's SPY dealer positioning, customer flow, method scores and breadth through the
+    day, so they can later be tested against how the day ended (no free history exists for them)."""
+    try:
+        last = json.loads((STATE_DIR / "last_scan.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    try:  # the scan stamps its machine's local time (UTC on GitHub's runners)
+        stamp = pd.Timestamp(last["time"]).tz_localize(datetime.now().astimezone().tzinfo).tz_convert(data.NEW_YORK)
+    except (KeyError, ValueError, TypeError):
+        return
+    if stamp.date() != datetime.now(data.NEW_YORK).date():
+        return
+    day = state.setdefault("observe", {}).setdefault(stamp.date().isoformat(), {"scans": {}})
+    day["scans"].setdefault(stamp.strftime("%H:%M"), {k: last.get(k) for k in (
+        "spy_read", "spy_gamma", "spy_methods", "breadth")})
+
+
+def observations_report(state: dict[str, Any] | None = None, at: str = "10:30") -> list[str]:
+    """Test the logged factors: from the scan nearest `at` each day, does the rest of the day follow
+    the dealers' gamma, customer delta, breadth and the dashboard's SPY read, and how far does it go?"""
+    state = state or load()
+    rows = []
+    for d, o in sorted(state.get("observe", {}).items()):
+        if "close" not in o or not o["scans"]:
+            continue
+        t = min(o["scans"], key=lambda s: abs(pd.Timestamp(f"{d} {s}") - pd.Timestamp(f"{d} {at}")))
+        s = o["scans"][t]
+        spot = (s.get("spy_read") or {}).get("spot")
+        if not spot:
+            continue
+        g, b = s.get("spy_gamma") or {}, s.get("breadth") or {}
+        rows.append({"rest": o["close"] / spot - 1, "short_gamma": None if g.get("net_gex") is None else g["net_gex"] < 0,
+                     "customer_long": None if g.get("customer_dex") is None else g["customer_dex"] > 0,
+                     "breadth_up": None if b.get("up") is None else b["up"] > 0.5,
+                     "dashboard_bull": (s.get("spy_read") or {}).get("trend", 0) > 0})
+    if not rows:
+        return ["No completed observation days yet"]
+    df = pd.DataFrame(rows)
+    out = [f"{len(df)} days, scan nearest {at}; rest of day up {(df['rest'] > 0).mean():.0%}, "
+           f"average size {df['rest'].abs().mean():.2%}"]
+    for col, yes, no in (("short_gamma", "dealers short gamma", "dealers long gamma"),
+                         ("customer_long", "customers net long delta", "customers net short delta"),
+                         ("breadth_up", "most tickers up", "most tickers down"),
+                         ("dashboard_bull", "dashboard reads SPY up", "dashboard reads SPY down")):
+        for flag, name in ((True, yes), (False, no)):
+            g = df[df[col] == flag]
+            if len(g):
+                out.append(f"  {name:28} {len(g):3d} days: rest of day up {(g['rest'] > 0).mean():.0%}, "
+                           f"average size {g['rest'].abs().mean():.2%}")
+    return out
+
+
 def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
     out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0,
@@ -365,6 +419,20 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
 
 def score_calls(state: dict[str, Any]) -> None:
     """After the close: did each index close above its open, and SPY above its 10:30 price?"""
+    now = datetime.now(data.NEW_YORK)
+    pending = [d for d, o in state.get("observe", {}).items() if "close" not in o
+               and not (pd.Timestamp(d).date() == now.date() and now.time() < clock(16, 5))]
+    if pending:
+        try:
+            daily = data.call(yf.Ticker("SPY").history, period="1mo", interval="1d", auto_adjust=False)
+            daily.index = daily.index.tz_convert("America/New_York").date
+        except Exception:
+            daily = None
+        for d in pending if daily is not None else []:
+            if pd.Timestamp(d).date() in daily.index:
+                bar = daily.loc[pd.Timestamp(d).date()]
+                state["observe"][d].update(open=float(bar["Open"]), high=float(bar["High"]),
+                                           low=float(bar["Low"]), close=float(bar["Close"]))
     for d, day in state.get("calls", {}).items():
         u = day.get("update")
         if u and "outcome" not in u and not (pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date()
@@ -446,6 +514,7 @@ def run() -> list[str]:
     now = datetime.now(data.NEW_YORK)
     notes = []
     if now.weekday() < 5 and data.market_open():
+        observe(state)
         if CALL_FROM <= now.time() < CALL_UNTIL:
             try:
                 notes += make_call(state)
@@ -469,7 +538,9 @@ def run() -> list[str]:
 
 
 if __name__ == "__main__":
-    if "--report" in sys.argv:
+    if "--observations" in sys.argv:
+        print("\n".join(observations_report()))
+    elif "--report" in sys.argv:
         for s in summary():
             avg = "n/a" if s["avg"] is None else f"${s['avg']:+.2f}"
             print(f"{s['name']:45} {s['trades']} closed, {s['open']} open, {s['wins']} won, avg {avg}, total ${s['total']:+.2f}")

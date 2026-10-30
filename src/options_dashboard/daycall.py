@@ -308,8 +308,12 @@ def update_1030(asof: date | None = None) -> dict[str, Any]:
         prev = float(daily["Close"][daily.index < ts].iloc[-1])
         row = _first_hour(g.iloc[:1], prev, float(atr_s.loc[ts]))
         row["y"] = float(g["Close"].iloc[-1] > row["price"])
+        row["rest_abs"] = abs(float(g["Close"].iloc[-1]) / row["price"] - 1)
         rows.append(row)
     hist = pd.DataFrame(rows)
+    # How wide the first hour was against the last 20 first hours: the clearest sign of how far the
+    # rest of the day will travel (narrow first hours led to afternoons about half the size of wide ones).
+    hist["rel"] = hist["h1_range"] / hist["h1_range"].rolling(20).mean().shift(1)
 
     def fit(train: pd.DataFrame):
         sc = StandardScaler().fit(train[FIRST_HOUR])
@@ -340,8 +344,17 @@ def update_1030(asof: date | None = None) -> dict[str, Any]:
     preds, ys = np.array(preds), np.array(ys)
     k = np.abs(preds - 0.5) >= CONFIDENT
     record = {"days": int(k.sum()), "right": float(((preds[k] > 0.5) == (ys[k] == 1)).mean()) if k.any() else None}
+
+    def size(rel: float) -> str:
+        return "quiet" if rel < 0.7 else "busy" if rel > 1.5 else "normal"
+    rel = row["h1_range"] / float(hist["h1_range"].tail(20).mean())
+    past = hist.dropna(subset=["rel"])
+    same = past[past["rel"].map(size) == size(rel)]
+    afternoon = {"size": size(rel), "rel": rel, "expected": float(same["rest_abs"].mean()),
+                 "typical": float(past["rest_abs"].mean()), "days": len(same)}
     return {"p_up": p, "direction": "up" if p >= 0.5 else "down", "confident": abs(p - 0.5) >= CONFIDENT,
-            "price": row["price"], "first_hour": {k_: row[k_] for k_ in FIRST_HOUR}, "record": record}
+            "price": row["price"], "first_hour": {k_: row[k_] for k_ in FIRST_HOUR}, "record": record,
+            "afternoon": afternoon}
 
 
 def describe_update(u: dict[str, Any]) -> str:
@@ -351,4 +364,7 @@ def describe_update(u: dict[str, Any]) -> str:
     rec = u.get("record") or {}
     track = (f". Its confident calls over the last ~6 months were right {rec['right']:.0%} of the time ({rec['days']} days)"
              if rec.get("right") is not None else "")
-    return f"{u['p_up']:.0%} chance SPY closes above {u['price']:.2f} (its 10:30 price); {shape}{track}"
+    a = u.get("afternoon")
+    rest = (f". Rest of the day: {a['size']} (first hour {a['rel']:.1f}x the usual width; such days moved "
+            f"{a['expected']:.2%} from 10:30 to the close on average, against {a['typical']:.2%} on all days)" if a else "")
+    return f"{u['p_up']:.0%} chance SPY closes above {u['price']:.2f} (its 10:30 price); {shape}{rest}{track}"
