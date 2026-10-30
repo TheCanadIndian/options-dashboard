@@ -12,11 +12,20 @@ RSI, VIX and its overnight change, VIX9D against VIX, VIX against VIX3M, yesterd
 high-yield credit, Treasuries, the 10-year yield, the dollar, small caps, the Nasdaq, equal weight
 against cap weight and tech against utilities, and the calendar), trained on every day since 2011.
 
-Honest record (yearly walk-forward 2016-2026): right 53.5% of days, 54.9% on confident days, with
-an average move in the called direction of about +3 basis points, far less than an out-of-the-money
-0DTE option costs. Confident calls were right only 49% of the time in 2025 and 47% in 2026. Each
-call carries the model's last-12-months record so its reliability is never overstated; the lab
-(zerodte.py) scores every call at real prices.
+It also uses the regime model's components and score as of the previous close, and trains only on
+the last five years: markets drift, and a model trained on all history since 2011 kept learning old
+lessons (its confident calls were right 45% of the time in 2025 and 41% in 2026; with a five-year
+window, 61% and 63%).
+
+Honest record (yearly walk-forward 2016-2026, five-year window): about 53% of all days right and
+55.8% of confident days, with an average move in the called direction of about +3 basis points, far
+less than an out-of-the-money 0DTE option costs. Each call carries the model's last-12-months record
+so its reliability is never overstated; the lab (zerodte.py) scores every call at real prices.
+
+update_1030() is a second call once the first hour is in: will SPY close above its 10:30 price? It
+uses only the first hour's shape (its move, where it closed in its range, its range against the
+usual day, whether it filled the gap), which in a two-year monthly walk-forward was the most
+informative signal found (59.8% of confident days, +5.4 basis points), on a small sample.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import yfinance as yf
 from . import data
 
 CONFIDENT = 0.10  # |probability - 0.5| at or above this is a confident call
+WINDOW_YEARS = 5  # train on the last five years only
 SYMS = ["SPY", "^VIX", "^VIX9D", "^VIX3M", "HYG", "TLT", "^TNX", "DX-Y.NYB", "IWM", "QQQ", "RSP", "XLK", "XLU"]
 OPEN_NOW = ["SPY", "^VIX", "^VIX9D", "^VIX1D", "^GSPC"]  # today's opening prints that feed the call or the strike
 
@@ -107,6 +117,18 @@ def _fit(train: pd.DataFrame, cols: list[str]):
     return predict, lin, sc
 
 
+def _regime_features(today: pd.Timestamp, index: pd.DatetimeIndex) -> tuple[pd.DataFrame, pd.Series]:
+    """The regime model's components, score and 10-day change as of each previous close, aligned to
+    `index`, and the values for `today` (as of the last close before it)."""
+    from . import regime
+    comps = regime.components(regime._closes())
+    comps.index = pd.to_datetime(pd.Index(comps.index).date)
+    comps["reg_score"] = comps.mean(axis=1) * 40
+    comps["reg_change"] = comps["reg_score"] - comps["reg_score"].shift(10)
+    comps = comps[comps.index < today].add_prefix("rg_")
+    return comps.shift(1).reindex(index, method="ffill"), comps.iloc[-1]
+
+
 def _opens_today() -> dict[str, float]:
     out = {}
     for sym in OPEN_NOW:
@@ -136,17 +158,22 @@ def call(asof: date | None = None) -> dict[str, Any]:
         if sym not in ("SPY", "^VIX", "^VIX9D"):
             px[sym] = px[sym][px[sym].index < today].reindex(px["SPY"].index, method="ffill")
     f = _features(px)
+    reg_hist, reg_today = _regime_features(today, f.index)
+    f = f.join(reg_hist)
+    f.loc[today, reg_today.index] = reg_today.to_numpy()
     cols = [c for c in f.columns if c != "y"]
-    history = f[f.index < today].dropna()
+    start = today - pd.DateOffset(years=WINDOW_YEARS)
+    history = f[(f.index < today)].dropna()
     today_row = f.loc[[today], cols]
     if today_row.isna().any(axis=None):
         today_row = today_row.fillna(history[cols].iloc[-1])
-    predict, lin, sc = _fit(history, cols)
+    predict, lin, sc = _fit(history[history.index >= start], cols)
     p = float(predict(today_row)[0])
 
-    # The model's own recent record: trained on everything before the last 12 months, judged on them.
+    # The model's own recent record: trained on the five years before the last 12 months, judged on them.
     cut = today - pd.DateOffset(months=12)
-    old, recent = history[history.index < cut], history[history.index >= cut]
+    old = history[(history.index < cut) & (history.index >= cut - pd.DateOffset(years=WINDOW_YEARS))]
+    recent = history[history.index >= cut]
     rec_predict, _, _ = _fit(old, cols)
     rp = rec_predict(recent)
     confident = np.abs(rp - 0.5) >= CONFIDENT
@@ -156,6 +183,7 @@ def call(asof: date | None = None) -> dict[str, Any]:
 
     z = sc.transform(today_row[cols])[0]
     calendar = {"mon", "tue", "wed", "thu", "fri", "month_turn", "opex"}
+    history = history[history.index >= start]
     contrib = [(c_, float(lin.coef_[0][k] * z[k])) for k, c_ in enumerate(cols)
                if not (c_ in calendar and today_row[c_].iloc[0] == 0)]
     drivers = sorted(contrib, key=lambda t: -abs(t[1]))[:3]
@@ -175,7 +203,11 @@ DRIVER_TEXT = {"gap": "the overnight gap", "gap_atr": "the gap's size", "prev_re
                "tnx": "the 10-year yield", "dxy": "the dollar", "iwm_spy": "small caps against SPY",
                "qqq_spy": "the Nasdaq against SPY", "rsp_spy5": "breadth (equal weight against SPY)",
                "xlk_xlu5": "tech against utilities", "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday",
-               "thu": "Thursday", "fri": "Friday", "month_turn": "the turn of the month", "opex": "options expiration"}
+               "thu": "Thursday", "fri": "Friday", "month_turn": "the turn of the month", "opex": "options expiration",
+               "rg_trend": "the regime's trend", "rg_volatility": "the regime's volatility reading",
+               "rg_credit": "the regime's credit reading", "rg_appetite": "risk appetite",
+               "rg_defensives": "defensive rotation", "rg_havens": "safe havens", "rg_reg_score": "the risk score",
+               "rg_reg_change": "the risk score's 10-day change"}
 
 
 def describe(c: dict[str, Any]) -> str:
@@ -210,3 +242,83 @@ def estimate_strike(c: dict[str, Any], ticker: str, cap: float) -> float | None:
             return float(k)
         k = k + step if call_ else k - step
     return None
+
+
+# ---------------------------------------------------------------- the 10:30 update
+
+FIRST_HOUR = ["h1_ret", "h1_loc", "h1_range", "gap_filled"]
+
+
+def _first_hour(g: pd.DataFrame, prev_close: float, atr: float) -> dict[str, float]:
+    """The first hour's shape from intraday bars covering 9:30-10:30."""
+    hi, lo = float(g["High"].max()), float(g["Low"].min())
+    o, c = float(g["Open"].iloc[0]), float(g["Close"].iloc[-1])
+    gap = o / prev_close - 1
+    return {"h1_ret": c / o - 1, "h1_loc": (c - lo) / (hi - lo) if hi > lo else 0.5, "h1_range": (hi - lo) / atr,
+            "gap_filled": float(lo <= prev_close if gap > 0 else hi >= prev_close), "price": c}
+
+
+def update_1030(asof: date | None = None) -> dict[str, Any]:
+    """Once the first hour is in: the chance SPY closes above its 10:30 price, from the first hour's
+    shape, trained on the last two years of hourly bars, with its own recent record."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    daily = _daily("SPY")
+    atr_s = (daily["High"] - daily["Low"]).rolling(14).mean().shift(1)
+    h = data.call(yf.Ticker("SPY").history, period="730d", interval="60m")
+    h.index = h.index.tz_convert("America/New_York")
+    today = asof or datetime.now(data.NEW_YORK).date()
+    rows = []
+    for d, g in h.groupby(h.index.date):
+        ts = pd.Timestamp(d)
+        if d >= today or len(g) < 7 or ts not in atr_s.index or pd.isna(atr_s.loc[ts]):
+            continue
+        prev = float(daily["Close"][daily.index < ts].iloc[-1])
+        row = _first_hour(g.iloc[:1], prev, float(atr_s.loc[ts]))
+        row["y"] = float(g["Close"].iloc[-1] > row["price"])
+        rows.append(row)
+    hist = pd.DataFrame(rows)
+
+    def fit(train: pd.DataFrame):
+        sc = StandardScaler().fit(train[FIRST_HOUR])
+        X = sc.transform(train[FIRST_HOUR])
+        ms = [LogisticRegression(C=0.05, max_iter=2000).fit(X, train["y"]),
+              HistGradientBoostingClassifier(max_depth=2, learning_rate=0.03, max_iter=150, min_samples_leaf=40,
+                                             random_state=0).fit(X, train["y"])]
+        return lambda df: np.mean([m.predict_proba(sc.transform(df[FIRST_HOUR]))[:, 1] for m in ms], axis=0)
+
+    # Today's first hour from 5-minute bars (9:30 to 10:30).
+    m5 = data.call(yf.Ticker("SPY").history, period="1d" if asof is None else "60d", interval="5m")
+    m5.index = m5.index.tz_convert("America/New_York")
+    m5 = m5[(m5.index.date == today)]
+    first = m5[m5.index < m5.index[0].replace(hour=10, minute=30)]
+    if len(first) < 12:
+        raise ValueError("the first hour is not complete yet")
+    ts = pd.Timestamp(today)
+    row = _first_hour(first, float(daily["Close"][daily.index < ts].iloc[-1]), float(atr_s.dropna().iloc[-1]))
+    p = float(fit(hist)(pd.DataFrame([row]))[0])
+
+    # Recent record: refit monthly over the last ~120 days, as it would have been made.
+    preds, ys = [], []
+    for start in range(len(hist) - 120, len(hist), 21):
+        model = fit(hist.iloc[:start])
+        chunk = hist.iloc[start:start + 21]
+        preds += list(model(chunk))
+        ys += list(chunk["y"])
+    preds, ys = np.array(preds), np.array(ys)
+    k = np.abs(preds - 0.5) >= CONFIDENT
+    record = {"days": int(k.sum()), "right": float(((preds[k] > 0.5) == (ys[k] == 1)).mean()) if k.any() else None}
+    return {"p_up": p, "direction": "up" if p >= 0.5 else "down", "confident": abs(p - 0.5) >= CONFIDENT,
+            "price": row["price"], "first_hour": {k_: row[k_] for k_ in FIRST_HOUR}, "record": record}
+
+
+def describe_update(u: dict[str, Any]) -> str:
+    fh = u["first_hour"]
+    shape = (f"first hour {fh['h1_ret']:+.2%}, closed {fh['h1_loc']:.0%} of the way up its range, range "
+             f"{fh['h1_range']:.1f}x a usual day's, gap {'filled' if fh['gap_filled'] else 'not filled'}")
+    rec = u.get("record") or {}
+    track = (f". Its confident calls over the last ~6 months were right {rec['right']:.0%} of the time ({rec['days']} days)"
+             if rec.get("right") is not None else "")
+    return f"{u['p_up']:.0%} chance SPY closes above {u['price']:.2f} (its 10:30 price); {shape}{track}"

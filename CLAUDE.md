@@ -62,7 +62,11 @@ the user's real money.
 - **0DTE lab** (`zerodte.py`, `daycall.py`): paper forward tests at real Cboe prices, run as a step before
   every scan. (1) The day's direction call for SPX and SPY, made at the open by a logistic model on
   pre-open data, posted to Discord at once, bought on confident days at about 9:30 prices (2x target or the
-  close), scored daily alongside the dashboard's own SPY read. (2) The 3:30 PM end-of-day momentum rule.
+  close), scored daily alongside the dashboard's own SPY read. It is measured on SPY's real open: the index's
+  official open is stale (it captures about 75% of the overnight move), so never train or score on it. The model
+  trains on a rolling five-year window with regime signals. (2) A 10:30 update from the first hour's shape.
+  (3) Trend-day trades from about 10:30 prices, with and without a dealers-short-gamma filter, to test whether
+  gamma adds an edge. (4) The 3:30 PM end-of-day momentum rule.
   Both came from backtests (Dec 2023 - Oct 2026) whose small edges vanished if real option prices were 15%
   higher than modelled, so they are not to be presented as proven until the lab's real-price record says so.
   SPY showed no edge in either. The user caps 0DTE contracts at $150.

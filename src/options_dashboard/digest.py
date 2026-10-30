@@ -274,6 +274,9 @@ def _day_call() -> dict[str, Any]:
                 lines.append(head + contract)
     s = zerodte.calls_scorecard(state)
     if s["days"]:
+        if s["update"]:
+            lines.append(f"10:30 updates: confident {s['update_confident_right']} of {s['update_confident']} right; "
+                         f"all {s['update_right']} of {s['update']}")
         lines.append(f"\nScorecard: confident calls {s['confident_right']} of {s['confident']} right; all calls "
                      f"{s['right']} of {s['days']}; dashboard's SPY read {s['dashboard_right']} of {s['dashboard']}")
     return {"title": "🎯 Today's direction call (SPX, SPY)", "description": "\n".join(lines)[:4000], "color": AMBER}

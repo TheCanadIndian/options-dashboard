@@ -44,7 +44,19 @@ VARIANTS = [
      "strategy": "daycall"},
     {"id": "day_spy40", "name": "Day call: SPY, up to $40", "ticker": "SPY", "cap": 0.40, "target": 2.0,
      "strategy": "daycall"},
+    # Trend days: a strong first hour that closes near its extreme, traded in its direction from about
+    # 10:30 prices. The plain version lost money in the backtest; the gamma filter (SPY dealers net
+    # short gamma, so hedging chases the move) is the user's framework and is tested here, live.
+    {"id": "trend_spx150_gamma", "name": "Trend day: SPX, up to $150, dealers short gamma", "ticker": "SPX",
+     "cap": 1.50, "target": 2.0, "strategy": "trend", "short_gamma": True},
+    {"id": "trend_spx150", "name": "Trend day: SPX, up to $150, no gamma filter (control)", "ticker": "SPX",
+     "cap": 1.50, "target": 2.0, "strategy": "trend"},
+    {"id": "trend_spy40_gamma", "name": "Trend day: SPY, up to $40, dealers short gamma", "ticker": "SPY",
+     "cap": 0.40, "target": 2.0, "strategy": "trend", "short_gamma": True},
 ]
+UPDATE_FROM, UPDATE_UNTIL = clock(10, 30), clock(10, 45)  # once the first hour is complete
+TREND_FROM, TREND_UNTIL = clock(10, 45), clock(11, 0)  # the 10:45 scan's delayed chain shows about 10:30
+TREND_MOVE, TREND_EDGE = 0.0025, 0.25  # first hour at least 0.25%, closing in its top or bottom quarter
 CALL_FROM, CALL_UNTIL = clock(9, 30), clock(10, 0)  # make the call once the open is known
 BUY_FROM = clock(9, 45)  # the 9:45 scan's delayed chain shows the market at about 9:30
 SOURCES = {"SPX": ("^GSPC", "_SPX"), "SPY": ("SPY", "SPY")}  # Yahoo bars, Cboe chain
@@ -245,9 +257,73 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
     return notes
 
 
+def make_update(state: dict[str, Any]) -> list[str]:
+    """At 10:30: the update call from the first hour, posted to Discord and kept for scoring."""
+    from . import daycall
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    day = state.setdefault("calls", {}).setdefault(today, {})
+    if "update" in day:
+        return []
+    u = daycall.update_1030()
+    day["update"] = u
+    head = (f"**SPY {'▲ up' if u['direction'] == 'up' else '▼ down'} {max(u['p_up'], 1 - u['p_up']):.0%} from here**"
+            if u["confident"] else "**No confident update: stand aside**")
+    fh = u["first_hour"]
+    trend = abs(fh["h1_ret"]) >= TREND_MOVE and (fh["h1_loc"] >= 1 - TREND_EDGE if fh["h1_ret"] > 0
+                                                  else fh["h1_loc"] <= TREND_EDGE)
+    gamma = _spy_short_gamma()
+    lines = [head, daycall.describe_update(u)]
+    if trend:
+        lines.append(f"Trend-day setup: a strong first hour closing near its {'high' if fh['h1_ret'] > 0 else 'low'}; "
+                     + ("dealers are short gamma, so hedging should chase it" if gamma else
+                        "dealers are not short gamma, so the move has less fuel" if gamma is False else "gamma unknown"))
+    lines.append("Paper-tested in the 0DTE lab; research, not advice.")
+    _post_discord("⏱ 10:30 update", "\n".join(lines))
+    return [f"10:30 update: {u['p_up']:.0%} up from {u['price']:.2f}"]
+
+
+def enter_trend(state: dict[str, Any]) -> list[str]:
+    """From the 10:45 scan: on a trend-day setup, buy each trend variant's contract at the real ask."""
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    day = state.get("calls", {}).get(today) or {}
+    u = day.get("update")
+    if not u or day.get("trend_entered"):
+        return []
+    day["trend_entered"] = True
+    fh = u["first_hour"]
+    up = fh["h1_ret"] > 0
+    if not (abs(fh["h1_ret"]) >= TREND_MOVE and (fh["h1_loc"] >= 1 - TREND_EDGE if up else fh["h1_loc"] <= TREND_EDGE)):
+        return []
+    gamma = _spy_short_gamma()
+    notes = []
+    for v in (x for x in VARIANTS if x.get("strategy") == "trend"):
+        if v.get("short_gamma") and gamma is not True:
+            continue
+        try:
+            chain = _today_chain(v["ticker"])
+            ref = float(data.cboe_chain(SOURCES[v["ticker"]][1])[1].get("price"))
+        except Exception:
+            continue
+        side = chain[(chain["type"] == ("call" if up else "put"))
+                     & ((chain["strike"] > ref) if up else (chain["strike"] < ref)) & (chain["ask"] <= v["cap"])]
+        if side.empty:
+            continue
+        pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
+        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if up else "put",
+                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
+                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
+                                "why": f"trend day: first hour {fh['h1_ret']:+.2%}, gamma {'short' if gamma else 'not short'}",
+                                "status": "open", "opened": datetime.now().isoformat(timespec="minutes")})
+        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {'call' if up else 'put'} at ${pick['ask']:.2f}")
+    if notes:
+        _post_discord("📈 Trend-day trades (paper)", "\n".join(notes))
+    return notes
+
+
 def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
-    out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0}
+    out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0,
+           "update": 0, "update_right": 0, "update_confident": 0, "update_confident_right": 0}
     for day in state.get("calls", {}).values():
         for name in ("SPY",):  # the call is measured on SPY's real open (the index's open is stale)
             c = day.get(name) or {}
@@ -259,6 +335,14 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
             if c["confident"]:
                 out["confident"] += 1
                 out["confident_right"] += right
+        u = day.get("update") or {}
+        if "outcome" in u:
+            r = u["direction"] == u["outcome"]
+            out["update"] += 1
+            out["update_right"] += r
+            if u["confident"]:
+                out["update_confident"] += 1
+                out["update_confident_right"] += r
         d = day.get("dashboard_spy") or {}
         if d.get("bias") in ("bullish", "bearish") and "outcome" in (day.get("SPY") or {}):
             out["dashboard"] += 1
@@ -267,8 +351,18 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def score_calls(state: dict[str, Any]) -> None:
-    """After the close: did each index close above its open?"""
+    """After the close: did each index close above its open, and SPY above its 10:30 price?"""
     for d, day in state.get("calls", {}).items():
+        u = day.get("update")
+        if u and "outcome" not in u and not (pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date()
+                                               and datetime.now(data.NEW_YORK).time() < clock(16, 5)):
+            try:
+                daily = data.call(yf.Ticker("SPY").history, period="1mo", interval="1d")
+                daily.index = daily.index.tz_convert("America/New_York").date
+                close = float(daily.loc[pd.Timestamp(d).date(), "Close"])
+                u.update(close=close, outcome="up" if close > u["price"] else "down")
+            except Exception:
+                pass
         for name in ("SPX", "SPY"):
             c = day.get(name)
             if not c or "outcome" in c:
@@ -346,6 +440,13 @@ def run() -> list[str]:
                 notes.append(f"Day call not made yet ({type(exc).__name__})")
             if now.time() >= BUY_FROM:
                 notes += enter_calls(state)
+        if UPDATE_FROM <= now.time() < UPDATE_UNTIL:
+            try:
+                notes += make_update(state)
+            except Exception as exc:
+                notes.append(f"10:30 update not made ({type(exc).__name__})")
+        if TREND_FROM <= now.time() < TREND_UNTIL:
+            notes += enter_trend(state)
         if ENTRY_FROM <= now.time() < ENTRY_UNTIL:
             notes += enter(state)
     notes += manage(state)
