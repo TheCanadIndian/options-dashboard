@@ -262,8 +262,13 @@ def _day_call() -> dict[str, Any]:
         lines.append("No call yet today (it is made at the open).")
     else:
         c0 = day["SPY"]  # one market-wide call, measured on SPY's real open
-        lines.append(f"**Market {'▲ up' if c0['direction'] == 'up' else '▼ down'} {max(c0['p_up'], 1 - c0['p_up']):.0%}**"
-                     if c0["confident"] else f"**No confident call: stand aside** ({c0['p_up']:.0%} chance SPY closes up)")
+        rng = f" · {c0['range']} day forecast ({c0['expected_move']:.2%} expected)" if c0.get("range") else ""
+        if c0["confident"] and c0.get("range") == "quiet":
+            lines.append(f"**Leans {c0['direction']}, but quiet day forecast: stand aside**{rng}")
+        else:
+            lines.append((f"**Market {'▲ up' if c0['direction'] == 'up' else '▼ down'} {max(c0['p_up'], 1 - c0['p_up']):.0%}**"
+                          if c0["confident"] else f"**No confident call: stand aside** ({c0['p_up']:.0%} chance SPY closes up)")
+                         + rng)
         for name in ("SPX", "SPY"):
             head = f"{name}:"
             bought = [t for t in state["trades"] if t["date"] == today and t["variant"].startswith("day_")
@@ -277,6 +282,12 @@ def _day_call() -> dict[str, Any]:
         if s["update"]:
             lines.append(f"10:30 updates: confident {s['update_confident_right']} of {s['update_confident']} right; "
                          f"all {s['update_right']} of {s['update']}")
+        if s["up_calls"] or s["down_calls"]:
+            lines.append(f"Up calls {s['up_right']} of {s['up_calls']} right; down calls {s['down_right']} of "
+                         f"{s['down_calls']} right")
+        if s["range"]:
+            lines.append("Range forecast: " + ", ".join(f"{k} days moved {v['move'] / v['days']:.2%} on average ({v['days']})"
+                                                      for k, v in s["range"].items()))
         lines.append(f"\nScorecard: confident calls {s['confident_right']} of {s['confident']} right; all calls "
                      f"{s['right']} of {s['days']}; dashboard's SPY read {s['dashboard_right']} of {s['dashboard']}")
     return {"title": "🎯 Today's direction call (SPX, SPY)", "description": "\n".join(lines)[:4000], "color": AMBER}

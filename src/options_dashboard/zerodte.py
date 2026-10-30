@@ -44,6 +44,8 @@ VARIANTS = [
      "strategy": "daycall"},
     {"id": "day_spy40", "name": "Day call: SPY, up to $40", "ticker": "SPY", "cap": 0.40, "target": 2.0,
      "strategy": "daycall"},
+    {"id": "day_spx150_active", "name": "Day call: SPX, up to $150, skipping quiet days", "ticker": "SPX", "cap": 1.50,
+     "target": 2.0, "strategy": "daycall", "skip_quiet": True},
     # Trend days: a strong first hour that closes near its extreme, traded in its direction from about
     # 10:30 prices. The plain version lost money in the backtest; the gamma filter (SPY dealers net
     # short gamma, so hedging chases the move) is the user's framework and is tested here, live.
@@ -188,7 +190,10 @@ def make_call(state: dict[str, Any]) -> list[str]:
     calls[today]["dashboard_spy"] = spy_read
     v = c["SPY"]  # one market-wide call (measured on SPY's real open), applied to both tickers
     lines = []
-    if v["confident"]:
+    if v["confident"] and v.get("range") == "quiet":
+        lines.append(f"**Market leans {v['direction']}, but a quiet day is forecast: stand aside** "
+                     f"(out-of-the-money 0DTE options need movement) · {daycall.describe(v)}")
+    elif v["confident"]:
         lines.append(f"**Market {'▲ up' if v['direction'] == 'up' else '▼ down'} "
                      f"{max(v['p_up'], 1 - v['p_up']):.0%}** · {daycall.describe(v)}")
         side = "call" if v["direction"] == "up" else "put"
@@ -232,7 +237,7 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
     notes = []
     for v in (x for x in VARIANTS if x.get("strategy") == "daycall"):
         c = day.get(v["ticker"])
-        if not c or not c["confident"]:
+        if not c or not c["confident"] or (v.get("skip_quiet") and c.get("range") == "quiet"):
             continue
         call_ = c["direction"] == "up"
         try:
@@ -323,7 +328,8 @@ def enter_trend(state: dict[str, Any]) -> list[str]:
 def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
     out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0,
-           "update": 0, "update_right": 0, "update_confident": 0, "update_confident_right": 0}
+           "update": 0, "update_right": 0, "update_confident": 0, "update_confident_right": 0,
+           "up_calls": 0, "up_right": 0, "down_calls": 0, "down_right": 0, "range": {}}
     for day in state.get("calls", {}).values():
         for name in ("SPY",):  # the call is measured on SPY's real open (the index's open is stale)
             c = day.get(name) or {}
@@ -335,6 +341,13 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
             if c["confident"]:
                 out["confident"] += 1
                 out["confident_right"] += right
+                side = "up" if c["direction"] == "up" else "down"
+                out[f"{side}_calls"] += 1
+                out[f"{side}_right"] += right
+            if c.get("range") and c.get("close") and c.get("open"):
+                b = out["range"].setdefault(c["range"], {"days": 0, "move": 0.0})
+                b["days"] += 1
+                b["move"] += abs(c["close"] / c["open"] - 1)
         u = day.get("update") or {}
         if "outcome" in u:
             r = u["direction"] == u["outcome"]

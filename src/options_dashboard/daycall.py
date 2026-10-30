@@ -22,6 +22,14 @@ Honest record (yearly walk-forward 2016-2026, five-year window): about 53% of al
 less than an out-of-the-money 0DTE option costs. Each call carries the model's last-12-months record
 so its reliability is never overstated; the lab (zerodte.py) scores every call at real prices.
 
+Direction skill is small and lopsided: up calls beat the market's upward drift by about 2 points
+(56% right against 54% of days closing up), and the rarer confident down calls about 10 (56% against
+46%). How much the market will move is far more predictable than which way (volatility clusters):
+the range forecast (quiet / normal / wide, from a ridge regression and trees on the same signals) put
+quiet days at an average move of 0.32% with 42% of them under 0.2%, and wide days at 0.88% with 46%
+over 0.75% (2016-2026 walk-forward). Out-of-the-money 0DTE options need movement, so quiet days stand
+aside whatever the direction.
+
 update_1030() is a second call once the first hour is in: will SPY close above its 10:30 price? It
 uses only the first hour's shape (its move, where it closed in its range, its range against the
 usual day, whether it filled the gap), which in a two-year monthly walk-forward was the most
@@ -97,6 +105,7 @@ def _features(px: dict[str, pd.DataFrame]) -> pd.DataFrame:
     f["month_turn"] = ((idx.day <= 3) | (idx.day >= 27)).astype(float)
     f["opex"] = ((idx.weekday == 4) & (idx.day >= 15) & (idx.day <= 21)).astype(float)
     f["y"] = (c > o).astype(float)
+    f["move"] = c / o - 1
     return f
 
 
@@ -127,6 +136,23 @@ def _regime_features(today: pd.Timestamp, index: pd.DatetimeIndex) -> tuple[pd.D
     comps["reg_change"] = comps["reg_score"] - comps["reg_score"].shift(10)
     comps = comps[comps.index < today].add_prefix("rg_")
     return comps.shift(1).reindex(index, method="ffill"), comps.iloc[-1]
+
+
+def _range(train: pd.DataFrame, today_row: pd.DataFrame, cols: list[str]) -> tuple[float, str]:
+    """Expected size of SPY's open-to-close move today, and quiet / normal / wide against the
+    training period's own forecasts (bottom third, middle, top third)."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    from sklearn.linear_model import Ridge
+    from sklearn.preprocessing import StandardScaler
+    move = np.log((train["move"]).abs() + 1e-4)
+    sc = StandardScaler().fit(train[cols])
+    X = sc.transform(train[cols])
+    ms = [Ridge(alpha=10.0).fit(X, move), HistGradientBoostingRegressor(
+        max_depth=3, learning_rate=0.03, max_iter=250, min_samples_leaf=80, random_state=0).fit(X, move)]
+    fit_sizes = np.exp(np.mean([m.predict(X) for m in ms], axis=0))
+    today = float(np.exp(np.mean([m.predict(sc.transform(today_row[cols])) for m in ms])))
+    quiet, wide = np.quantile(fit_sizes, [1 / 3, 2 / 3])
+    return today, ("quiet" if today <= quiet else "wide" if today >= wide else "normal")
 
 
 def _opens_today() -> dict[str, float]:
@@ -161,14 +187,15 @@ def call(asof: date | None = None) -> dict[str, Any]:
     reg_hist, reg_today = _regime_features(today, f.index)
     f = f.join(reg_hist)
     f.loc[today, reg_today.index] = reg_today.to_numpy()
-    cols = [c for c in f.columns if c != "y"]
+    cols = [c for c in f.columns if c not in ("y", "move")]
     start = today - pd.DateOffset(years=WINDOW_YEARS)
-    history = f[(f.index < today)].dropna()
+    history = f[(f.index < today)].dropna(subset=cols + ["y", "move"])
     today_row = f.loc[[today], cols]
     if today_row.isna().any(axis=None):
         today_row = today_row.fillna(history[cols].iloc[-1])
     predict, lin, sc = _fit(history[history.index >= start], cols)
     p = float(predict(today_row)[0])
+    expected, label = _range(history[history.index >= start], today_row, cols)
 
     # The model's own recent record: trained on the five years before the last 12 months, judged on them.
     cut = today - pd.DateOffset(months=12)
@@ -188,7 +215,8 @@ def call(asof: date | None = None) -> dict[str, Any]:
                if not (c_ in calendar and today_row[c_].iloc[0] == 0)]
     drivers = sorted(contrib, key=lambda t: -abs(t[1]))[:3]
     base = {"p_up": p, "direction": "up" if p >= 0.5 else "down", "confident": abs(p - 0.5) >= CONFIDENT,
-            "drivers": drivers, "trained_days": len(history), "record": record, "vix1d": opens.get("^VIX1D")}
+            "drivers": drivers, "trained_days": len(history), "record": record, "vix1d": opens.get("^VIX1D"),
+            "expected_move": expected, "range": label}
     return {"SPY": {**base, "open": opens["SPY"]}, "SPX": {**base, "open": opens["^GSPC"]}}
 
 
@@ -215,7 +243,9 @@ def describe(c: dict[str, Any]) -> str:
     rec = c.get("record") or {}
     track = (f". Its confident calls over the last 12 months were right {rec['right']:.0%} of the time "
              f"({rec['days']} days)" if rec.get("right") is not None else "")
-    return f"{c['p_up']:.0%} chance SPY closes above its open" + (f"; leaning on {lean}" if lean else "") + track
+    size = (f" Expected move {c['expected_move']:.2%} ({c['range']} day)" if c.get("expected_move") else "")
+    return (f"{c['p_up']:.0%} chance SPY closes above its open" + (f"; leaning on {lean}" if lean else "") + "." + size
+            + track)
 
 
 def estimate_strike(c: dict[str, Any], ticker: str, cap: float) -> float | None:
