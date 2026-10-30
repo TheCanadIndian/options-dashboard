@@ -41,6 +41,8 @@ jobs:
         run: uv run python -m options_dashboard.cloudstate pull
       - name: 0DTE lab
         continue-on-error: true  # the lab must never stop a scan
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: uv run python -m options_dashboard.zerodte
       - name: Scan
         run: |

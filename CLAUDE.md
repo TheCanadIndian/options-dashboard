@@ -59,6 +59,14 @@ the user's real money.
   the Roth shortlist's buy-area changes. No strategy-account trades (the user asked to leave them
   out). Test it with the scan workflow's `digest_now` input.
 
+- **0DTE lab** (`zerodte.py`, `daycall.py`): paper forward tests at real Cboe prices, run as a step before
+  every scan. (1) The day's direction call for SPX and SPY, made at the open by a logistic model on
+  pre-open data, posted to Discord at once, bought on confident days at about 9:30 prices (2x target or the
+  close), scored daily alongside the dashboard's own SPY read. (2) The 3:30 PM end-of-day momentum rule.
+  Both came from backtests (Dec 2023 - Oct 2026) whose small edges vanished if real option prices were 15%
+  higher than modelled, so they are not to be presented as proven until the lab's real-price record says so.
+  SPY showed no edge in either. The user caps 0DTE contracts at $150.
+
 ## Code map (`src/options_dashboard/`)
 
 | Module | What it does |

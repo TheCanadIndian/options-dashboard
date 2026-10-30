@@ -39,7 +39,14 @@ VARIANTS = [
     {"id": "spx150_gamma", "name": "SPX, up to $150, dealers short gamma only", "ticker": "SPX", "cap": 1.50,
      "target": 3.0, "slack": 0.0, "short_gamma": True},
     {"id": "spy15", "name": "SPY, up to $15", "ticker": "SPY", "cap": 0.15, "target": 3.0, "slack": 0.0},
+    # The day's direction call (daycall.py): bought at the open on confident days, 2x or the close.
+    {"id": "day_spx150", "name": "Day call: SPX, up to $150", "ticker": "SPX", "cap": 1.50, "target": 2.0,
+     "strategy": "daycall"},
+    {"id": "day_spy40", "name": "Day call: SPY, up to $40", "ticker": "SPY", "cap": 0.40, "target": 2.0,
+     "strategy": "daycall"},
 ]
+CALL_FROM, CALL_UNTIL = clock(9, 30), clock(10, 0)  # make the call once the open is known
+BUY_FROM = clock(9, 45)  # the 9:45 scan's delayed chain shows the market at about 9:30
 SOURCES = {"SPX": ("^GSPC", "_SPX"), "SPY": ("SPY", "SPY")}  # Yahoo bars, Cboe chain
 FEES = {"SPX": 1.25, "SPY": 0.65}  # per contract each way (SPX carries an exchange fee)
 ENTRY_FROM, ENTRY_UNTIL = clock(15, 45), clock(16, 0)
@@ -112,6 +119,8 @@ def enter(state: dict[str, Any]) -> list[str]:
     bars, chains = {}, {}
     gamma_short = _spy_short_gamma()
     for v in VARIANTS:
+        if v.get("strategy", "momentum") != "momentum":
+            continue
         t = v["ticker"]
         try:
             bars.setdefault(t, _bars(t))
@@ -147,6 +156,131 @@ def enter(state: dict[str, Any]) -> list[str]:
         notes.append(f"{v['name']}: bought {t} {trade['strike']:g} {trade['type']} at ${trade['entry']:.2f}")
     state["days"][today] = record
     return notes
+
+
+def make_call(state: dict[str, Any]) -> list[str]:
+    """At the open: the day's direction call for SPX and SPY, posted to Discord at once (the edge, such
+    as it is, only exists right at the open)."""
+    from . import daycall
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    calls = state.setdefault("calls", {})
+    if today in calls:
+        return []
+    c = daycall.call()
+    try:
+        last = json.loads((STATE_DIR / "last_scan.json").read_text(encoding="utf-8"))
+        spy_read = last.get("spy_read") or {}
+    except (OSError, json.JSONDecodeError):
+        spy_read = {}
+    calls[today] = {k: {**v, "drivers": v["drivers"]} for k, v in c.items()}
+    calls[today]["dashboard_spy"] = spy_read
+    lines = []
+    for name in ("SPX", "SPY"):
+        v = c[name]
+        if v["confident"]:
+            var = next(x for x in VARIANTS if x.get("strategy") == "daycall" and x["ticker"] == name)
+            k = daycall.estimate_strike(v, name, var["cap"])
+            side = "call" if v["direction"] == "up" else "put"
+            contract = (f"buy the {'SPXW' if name == 'SPX' else 'SPY'} 0DTE {side}, nearest strike out of the money with "
+                        f"an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f})" if k else "") +
+                        f"; sell at {var['target']:.0f}x or hold to the close")
+            lines.append(f"**{name} {'▲' if v['direction'] == 'up' else '▼'} {max(v['p_up'], 1 - v['p_up']):.0%} "
+                         f"{v['direction']}** (open {v['open']:,.2f}) → {contract}\n{daycall.describe(v)}")
+        else:
+            lines.append(f"**{name}: no confident call** ({v['p_up']:.0%} chance of closing above the open {v['open']:,.2f}): "
+                         f"stand aside")
+    if spy_read.get("bias"):
+        lines.append(f"Dashboard's full SPY read: {spy_read['bias']} ({spy_read['trend']:+.0f}), a second opinion")
+    record = calls_scorecard(state)
+    if record["confident"]:
+        lines.append(f"Confident calls so far: {record['confident_right']} of {record['confident']} right")
+    lines.append("Paper-tested at real prices in the 0DTE lab before it should be trusted; research, not advice.")
+    _post_discord("🎯 Today's direction call", "\n".join(lines))
+    return [f"Day call: SPX {c['SPX']['p_up']:.0%} up, SPY {c['SPY']['p_up']:.0%} up"]
+
+
+def _post_discord(title: str, text: str) -> None:
+    import os
+    import requests
+    url = os.environ.get("DISCORD_WEBHOOK")
+    if not url:
+        return
+    try:
+        requests.post(url, json={"username": "Options Terminal",
+                                 "embeds": [{"title": title, "description": text[:4000], "color": 0xFFA028}]}, timeout=15)
+    except requests.RequestException:
+        pass
+
+
+def enter_calls(state: dict[str, Any]) -> list[str]:
+    """From the 9:45 scan: buy the confident calls' contracts at the real ask (about 9:30 prices)."""
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    day = state.get("calls", {}).get(today)
+    if not day or day.get("entered"):
+        return []
+    notes = []
+    for v in (x for x in VARIANTS if x.get("strategy") == "daycall"):
+        c = day.get(v["ticker"])
+        if not c or not c["confident"]:
+            continue
+        call_ = c["direction"] == "up"
+        try:
+            chain = _today_chain(v["ticker"])
+        except Exception:
+            continue
+        side = chain[(chain["type"] == ("call" if call_ else "put"))
+                     & ((chain["strike"] > c["open"]) if call_ else (chain["strike"] < c["open"]))
+                     & (chain["ask"] <= v["cap"])]
+        if side.empty:
+            continue
+        pick = side.iloc[(side["strike"] - c["open"]).abs().argsort()].iloc[0]
+        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if call_ else "put",
+                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
+                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": c["open"],
+                                "why": f"day call {c['p_up']:.0%} up", "status": "open",
+                                "opened": datetime.now().isoformat(timespec="minutes")})
+        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} at ${pick['ask']:.2f}")
+    day["entered"] = True
+    return notes
+
+
+def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
+    """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
+    out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0}
+    for day in state.get("calls", {}).values():
+        for name in ("SPX", "SPY"):
+            c = day.get(name) or {}
+            if "outcome" not in c:
+                continue
+            right = c["direction"] == c["outcome"]
+            out["days"] += 1
+            out["right"] += right
+            if c["confident"]:
+                out["confident"] += 1
+                out["confident_right"] += right
+        d = day.get("dashboard_spy") or {}
+        if d.get("bias") in ("bullish", "bearish") and "outcome" in (day.get("SPY") or {}):
+            out["dashboard"] += 1
+            out["dashboard_right"] += (d["bias"] == "bullish") == (day["SPY"]["outcome"] == "up")
+    return out
+
+
+def score_calls(state: dict[str, Any]) -> None:
+    """After the close: did each index close above its open?"""
+    for d, day in state.get("calls", {}).items():
+        for name in ("SPX", "SPY"):
+            c = day.get(name)
+            if not c or "outcome" in c:
+                continue
+            try:
+                daily = data.call(yf.Ticker(SOURCES[name][0]).history, period="1mo", interval="1d")
+                daily.index = daily.index.tz_convert("America/New_York").date
+                close = float(daily.loc[pd.Timestamp(d).date(), "Close"])
+            except Exception:
+                continue
+            if pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date() and datetime.now(data.NEW_YORK).time() < clock(16, 5):
+                continue
+            c.update(close=close, outcome="up" if close > c["open"] else "down")
 
 
 def manage(state: dict[str, Any]) -> list[str]:
@@ -203,9 +337,18 @@ def run() -> list[str]:
     state = load()
     now = datetime.now(data.NEW_YORK)
     notes = []
-    if now.weekday() < 5 and ENTRY_FROM <= now.time() < ENTRY_UNTIL and data.market_open():
-        notes += enter(state)
+    if now.weekday() < 5 and data.market_open():
+        if CALL_FROM <= now.time() < CALL_UNTIL:
+            try:
+                notes += make_call(state)
+            except Exception as exc:  # no bars yet at 9:30 sharp: the 9:45 run tries again
+                notes.append(f"Day call not made yet ({type(exc).__name__})")
+            if now.time() >= BUY_FROM:
+                notes += enter_calls(state)
+        if ENTRY_FROM <= now.time() < ENTRY_UNTIL:
+            notes += enter(state)
     notes += manage(state)
+    score_calls(state)
     _save(state)
     return notes
 

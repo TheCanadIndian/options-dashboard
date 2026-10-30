@@ -84,6 +84,7 @@ def save_scan(result: dict[str, Any]) -> None:
     spy = (result["tickers"].get("SPY") or {}).get("levels") or {}
     out = {"time": result["scanned_at"].isoformat(timespec="minutes"), "swing": rows(result["contracts"]),
            "spy_gamma": {k: spy.get(k) for k in ("net_gex", "flip", "call_wall", "put_wall")},
+           "spy_read": {k: (result["tickers"].get("SPY") or {}).get(k) for k in ("trend", "bias")},
            "short": rows(result.get("short_contracts")), "earnings": earnings}
     LAST_SCAN.parent.mkdir(parents=True, exist_ok=True)
     LAST_SCAN.write_text(json.dumps(out, default=float), encoding="utf-8")
@@ -250,6 +251,32 @@ def _contracts(scan: dict[str, Any]) -> dict[str, Any]:
     return {"title": "Today's contract per ticker", "description": text[:4000], "color": AMBER}
 
 
+def _day_call() -> dict[str, Any]:
+    """Today's SPX and SPY direction call, the contract bought on it, and the scorecard."""
+    from . import zerodte
+    state = zerodte.load()
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    day = state.get("calls", {}).get(today)
+    lines = []
+    if not day:
+        lines.append("No call yet today (it is made at the open).")
+    else:
+        for name in ("SPX", "SPY"):
+            c = day[name]
+            head = (f"**{name} {'▲ up' if c['direction'] == 'up' else '▼ down'} {max(c['p_up'], 1 - c['p_up']):.0%}**"
+                    if c["confident"] else f"**{name}: no confident call** ({c['p_up']:.0%} up)")
+            bought = [t for t in state["trades"] if t["date"] == today and t["variant"].startswith("day_")
+                      and t["ticker"] == name]
+            contract = (f" → bought {bought[0]['ticker']} {bought[0]['strike']:g} {bought[0]['type']} at "
+                        f"${bought[0]['entry']:.2f} (paper; 2x target or hold)") if bought else ""
+            lines.append(head + contract)
+    s = zerodte.calls_scorecard(state)
+    if s["days"]:
+        lines.append(f"\nScorecard: confident calls {s['confident_right']} of {s['confident']} right; all calls "
+                     f"{s['right']} of {s['days']}; dashboard's SPY read {s['dashboard_right']} of {s['dashboard']}")
+    return {"title": "🎯 Today's direction call (SPX, SPY)", "description": "\n".join(lines)[:4000], "color": AMBER}
+
+
 def _zerodte() -> dict[str, Any]:
     """The 0DTE lab's forward test: results per variant and the last trading day's trades."""
     from . import zerodte
@@ -310,7 +337,8 @@ def build(cfg: dict[str, Any]) -> tuple[list[tuple[dict[str, Any], dict[str, byt
     market = _market(seen, keep, files)
     invest = _invest(seen, keep)
     messages = [
-        ({"content": f"**📊 Daily digest · {day:%A, %B} {day.day}**", "embeds": market}, files),
+        ({"content": f"**📊 Daily digest · {day:%A, %B} {day.day}**", "embeds": [_day_call()]}, {}),
+        ({"embeds": market}, files),
         ({"embeds": [_earnings(scan)]}, {}),
         ({"embeds": [_contracts(scan), _zerodte()]}, {}),
         ({"embeds": ([invest] if invest else []) + [footer]}, {}),
