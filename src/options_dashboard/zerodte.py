@@ -174,21 +174,20 @@ def make_call(state: dict[str, Any]) -> list[str]:
         spy_read = {}
     calls[today] = {k: {**v, "drivers": v["drivers"]} for k, v in c.items()}
     calls[today]["dashboard_spy"] = spy_read
+    v = c["SPY"]  # one market-wide call (measured on SPY's real open), applied to both tickers
     lines = []
-    for name in ("SPX", "SPY"):
-        v = c[name]
-        if v["confident"]:
+    if v["confident"]:
+        lines.append(f"**Market {'▲ up' if v['direction'] == 'up' else '▼ down'} "
+                     f"{max(v['p_up'], 1 - v['p_up']):.0%}** · {daycall.describe(v)}")
+        side = "call" if v["direction"] == "up" else "put"
+        for name in ("SPX", "SPY"):
             var = next(x for x in VARIANTS if x.get("strategy") == "daycall" and x["ticker"] == name)
-            k = daycall.estimate_strike(v, name, var["cap"])
-            side = "call" if v["direction"] == "up" else "put"
-            contract = (f"buy the {'SPXW' if name == 'SPX' else 'SPY'} 0DTE {side}, nearest strike out of the money with "
-                        f"an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f})" if k else "") +
-                        f"; sell at {var['target']:.0f}x or hold to the close")
-            lines.append(f"**{name} {'▲' if v['direction'] == 'up' else '▼'} {max(v['p_up'], 1 - v['p_up']):.0%} "
-                         f"{v['direction']}** (open {v['open']:,.2f}) → {contract}\n{daycall.describe(v)}")
-        else:
-            lines.append(f"**{name}: no confident call** ({v['p_up']:.0%} chance of closing above the open {v['open']:,.2f}): "
-                         f"stand aside")
+            k = daycall.estimate_strike(c[name], name, var["cap"])
+            lines.append(f"→ **{name}**: buy the {'SPXW' if name == 'SPX' else 'SPY'} 0DTE {side}, nearest strike out of the "
+                         f"money with an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f})" if k else "") +
+                         f"; sell at {var['target']:.0f}x or hold to the close")
+    else:
+        lines.append(f"**No confident call: stand aside.** {daycall.describe(v)}")
     if spy_read.get("bias"):
         lines.append(f"Dashboard's full SPY read: {spy_read['bias']} ({spy_read['trend']:+.0f}), a second opinion")
     record = calls_scorecard(state)
@@ -226,17 +225,19 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
         call_ = c["direction"] == "up"
         try:
             chain = _today_chain(v["ticker"])
+            # The price in the same delayed snapshot as the quotes; the index's official open is stale.
+            ref = float(data.cboe_chain(SOURCES[v["ticker"]][1])[1].get("price") or c["open"])
         except Exception:
             continue
         side = chain[(chain["type"] == ("call" if call_ else "put"))
-                     & ((chain["strike"] > c["open"]) if call_ else (chain["strike"] < c["open"]))
+                     & ((chain["strike"] > ref) if call_ else (chain["strike"] < ref))
                      & (chain["ask"] <= v["cap"])]
         if side.empty:
             continue
-        pick = side.iloc[(side["strike"] - c["open"]).abs().argsort()].iloc[0]
+        pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
         state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if call_ else "put",
                                 "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
-                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": c["open"],
+                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
                                 "why": f"day call {c['p_up']:.0%} up", "status": "open",
                                 "opened": datetime.now().isoformat(timespec="minutes")})
         notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} at ${pick['ask']:.2f}")
@@ -248,7 +249,7 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
     out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0}
     for day in state.get("calls", {}).values():
-        for name in ("SPX", "SPY"):
+        for name in ("SPY",):  # the call is measured on SPY's real open (the index's open is stale)
             c = day.get(name) or {}
             if "outcome" not in c:
                 continue

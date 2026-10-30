@@ -261,15 +261,17 @@ def _day_call() -> dict[str, Any]:
     if not day:
         lines.append("No call yet today (it is made at the open).")
     else:
+        c0 = day["SPY"]  # one market-wide call, measured on SPY's real open
+        lines.append(f"**Market {'▲ up' if c0['direction'] == 'up' else '▼ down'} {max(c0['p_up'], 1 - c0['p_up']):.0%}**"
+                     if c0["confident"] else f"**No confident call: stand aside** ({c0['p_up']:.0%} chance SPY closes up)")
         for name in ("SPX", "SPY"):
-            c = day[name]
-            head = (f"**{name} {'▲ up' if c['direction'] == 'up' else '▼ down'} {max(c['p_up'], 1 - c['p_up']):.0%}**"
-                    if c["confident"] else f"**{name}: no confident call** ({c['p_up']:.0%} up)")
+            head = f"{name}:"
             bought = [t for t in state["trades"] if t["date"] == today and t["variant"].startswith("day_")
                       and t["ticker"] == name]
             contract = (f" → bought {bought[0]['ticker']} {bought[0]['strike']:g} {bought[0]['type']} at "
                         f"${bought[0]['entry']:.2f} (paper; 2x target or hold)") if bought else ""
-            lines.append(head + contract)
+            if contract:
+                lines.append(head + contract)
     s = zerodte.calls_scorecard(state)
     if s["days"]:
         lines.append(f"\nScorecard: confident calls {s['confident_right']} of {s['confident']} right; all calls "
