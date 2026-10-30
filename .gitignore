@@ -8,3 +8,5 @@ config.json
 journal/
 # address and key for the cloud copy of the state (see cloudstate.py)
 .cloud.json
+# long intraday history from Alpaca, for research (see history.py)
+.history/
