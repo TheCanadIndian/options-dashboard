@@ -83,6 +83,16 @@ the user's real money.
   variants (sold when the underlying reaches the level), scored daily. Yesterday's profile shape (P, b, D,
   trend) predicted nothing. Yahoo keeps 30-minute bars only 60 days, so the long test used hourly volume
   profiles (95% the same setups).
+  Each variant is a $1,000 paper portfolio (`zerodte.portfolios`; trades skipped when it can't pay). Every
+  finished day gets a review (`review_day`, run by the 17:15 research job, posted to Discord, on the Strategies
+  page): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
+  short of the strike, target, stop), with lessons; `lessons_scorecard` adds them up (`zerodte --review`).
+  From a two-year replay of the day call (Oct 2026): a first hour 0.25%+ against a confident call left it
+  right only 27% of days (33), so day-call contracts are sold at 10:30 then (`invalidate_calls`, with the
+  held-to-close result kept to grade the stop). A $150 SPX contract at the open sits ~1% out of the money,
+  reached on only 13% of confident days (0.4%: 57%), hence the near-the-money SPY $150 variants. The size
+  forecast runs low (actual moves a median 1.15x it). Yahoo's daily bar can be blank right after the close:
+  `_close_on` waits for a good one and `_heal` redoes anything settled on a blank.
 
 ## Code map (`src/options_dashboard/`)
 

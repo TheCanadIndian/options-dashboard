@@ -1542,12 +1542,46 @@ def _zerodte_section() -> str:
     """The 0DTE lab: the forward test of the end-of-day momentum rule at real prices."""
     from . import zerodte
     state = zerodte.load()
-    rows = "".join(
-        f'<tr>{_cell(s["name"], escape(s["name"]), False)}{_cell(s["trades"], str(s["trades"]))}'
-        f'{_cell(s["wins"], f"{s["wins"]} of {s["trades"]}" if s["trades"] else "–")}'
-        f'{_cell(s["avg"] or 0, _signed(s["avg"]) if s["avg"] is not None else "–")}'
-        f'{_cell(s["total"], _signed(s["total"]))}{_cell(s["checked"], str(s["checked"]))}</tr>'
-        for s in zerodte.summary(state))
+    board = zerodte.portfolios(state)
+    start = zerodte.START_BALANCE
+    groups = []
+    for fam, label in zerodte.FAMILIES.items():
+        members = [p for p in board if p["family"] == fam]
+        rows = ""
+        for p in members:
+            ret = f'<span class="{"up" if p["return"] >= 0 else "down"}">{p["return"]:+.1%}</span>'
+            record = f'{p["wins"]}–{p["trades"] - p["wins"]}' if p["trades"] else "0"
+            rows += (f'<tr>{_cell(p["name"], escape(p["name"].split(": ", 1)[-1]), False)}'
+                     f'{_cell(p["balance"], _money(p["balance"]))}{_cell(p["return"], ret)}{_cell(p["trades"], record)}'
+                     f'{_cell(p["best"] or 0, _signed(p["best"]) if p["best"] is not None else "–")}'
+                     f'{_cell(p["worst"] or 0, _signed(p["worst"]) if p["worst"] is not None else "–")}'
+                     f'{_cell(p["drop"], f"{p['drop']:.0%}")}</tr>')
+        series = [(p["name"].split(": ", 1)[-1], p["curve"]) for p in members]
+        groups.append(f'<h4 style="margin:16px 0 8px">{escape(label)}</h4>'
+                      f'<div class="scroll"><table class="sortable"><thead><tr><th>Portfolio</th><th>Value</th><th>Return</th>'
+                      f'<th>Won–lost</th><th>Best</th><th>Worst</th><th>Largest drop</th></tr></thead><tbody>{rows}</tbody>'
+                      f'</table></div>' + (_both(_multi_chart(series, start, 800), _multi_chart(series, start, 420))
+                                           if any(p["trades"] for p in members) else ""))
+    reviews = state.get("reviews", {})
+    latest = reviews[max(reviews)] if reviews else None
+    review_html = ""
+    if latest:
+        m = latest["market"]
+        calls = "".join(f'<li>{"✅" if c["right"] else "❌"} {escape(c["name"])}: {escape(c["said"])}</li>' if c["confident"]
+                        else f'<li>➖ {escape(c["name"])}: {escape(c["said"])}</li>' for c in latest["calls"])
+        trades = "".join(f'<li><b>{escape(t["name"])}</b> ({escape(t["contract"])} at {_money(t["entry"])}): '
+                         f'{_signed(t["pnl"])}. {escape(t["verdict"])}</li>' for t in latest["trades"])
+        lessons = "".join(f"<li>{escape(x)}</li>" for x in latest["lessons"])
+        review_html = (
+            f'<h3>Daily review: {_day(latest["date"])}</h3><div class="panel"><p>SPY {m["move"]:+.2%} open to close, range '
+            f'{m["range"]:.2%}, first hour {m["h1"]:+.2%}'
+            + (f'; the morning forecast was {m["expected"]:.2%}, so the day ran {m["ratio"]:.1f}x it' if "ratio" in m else "")
+            + f'.</p><h4>The calls</h4><ul>{calls or "<li>None scored</li>"}</ul>'
+            f'<h4>The trades</h4><ul>{trades or "<li>None</li>"}</ul>'
+            + (f'<h4>Lessons</h4><ul>{lessons}</ul>' if lessons else "")
+            + '<h4>What the reviews add up to</h4><ul>'
+            + "".join(f"<li>{escape(x)}</li>" for x in zerodte.describe_scorecard(zerodte.lessons_scorecard(state)))
+            + '</ul></div>')
     recent = "".join(
         f'<tr><td class="num">{escape(t["date"])}</td><td>{escape(t["variant"])}</td>'
         f'<td>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</td><td class="num">{_money(t["entry"])}</td>'
@@ -1564,8 +1598,11 @@ def _zerodte_section() -> str:
         '<b>Momentum</b>: at 3:30 PM, above every high from 9:30 to 2:30 and the open, a call (below, a put), sold at 3x '
         'or held to the close. The backtests behind them showed small edges that real option prices could erase, which '
         'is what these records are for.</p>'
-        f'<div class="panel scroll"><table><thead><tr><th>Variant</th><th>Trades</th><th>Won</th><th>Average</th>'
-        f'<th>Total</th><th>Days checked</th></tr></thead><tbody>{rows}</tbody></table></div>'
+        f'<p class="small">Each variant is its own paper portfolio of {_money(start, False)}, one contract a trade, skipped '
+        'when the portfolio can\'t pay for it. Day-call contracts are sold at 10:30 when the first hour runs 0.25% or '
+        'more against the call. Every finished day gets a review: what the market did against the forecasts, why each '
+        'trade won or lost, and the lessons, also posted to Discord.</p>'
+        f'<div class="panel">{"".join(groups)}</div>{review_html}'
         + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
            f'<th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
            '<p class="muted small">No trades yet: the rule fires on roughly one day in four.</p>'))

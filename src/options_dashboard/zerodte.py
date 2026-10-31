@@ -14,7 +14,8 @@ everything left is settled at the official close by a later run.
 Several variants run side by side so evidence builds faster (see VARIANTS). One contract each.
 
     python -m options_dashboard.zerodte            # enter at 3:45-4:00, otherwise manage and settle
-    python -m options_dashboard.zerodte --report   # print the results so far
+    python -m options_dashboard.zerodte --report   # each variant's paper portfolio
+    python -m options_dashboard.zerodte --review   # the daily reviews and what they add up to
     python -m options_dashboard.zerodte --observations   # test the logged gamma, flow and breadth
 """
 
@@ -62,7 +63,23 @@ VARIANTS = [
      "strategy": "profile"},
     {"id": "profile_spy40", "name": "Market profile: SPY, up to $40", "ticker": "SPY", "cap": 0.40,
      "strategy": "profile"},
+    # Near the money (added Oct 31, 2026): $150 at the open buys an SPX strike about 1% away, and replayed
+    # confident days travelled that far their way only 13% of the time (0.4%: 57%). The same $150 buys an
+    # SPY strike a dollar or two out, inside the moves that actually happen.
+    {"id": "day_spy150", "name": "Day call: SPY, up to $150, near the money", "ticker": "SPY", "cap": 1.50,
+     "target": 2.0, "strategy": "daycall"},
+    {"id": "trend_spy150", "name": "Trend day: SPY, up to $150, near the money", "ticker": "SPY", "cap": 1.50,
+     "target": 2.0, "strategy": "trend"},
+    {"id": "profile_spy150", "name": "Market profile: SPY, up to $150, near the money", "ticker": "SPY", "cap": 1.50,
+     "strategy": "profile"},
 ]
+FAMILIES = {"daycall": "Day call", "trend": "Trend day", "profile": "Market profile", "momentum": "End-of-day momentum"}
+ENTRY_AT = {"daycall": (9, 30), "trend": (10, 30), "profile": (10, 30), "momentum": (15, 30)}  # what the quotes show
+START_BALANCE = 1000.0  # each variant's paper portfolio
+# Replayed day calls (walk-forward, Nov 2023 - Oct 2026): when the first hour ran 0.25% or more against a
+# confident call, the day closed the call's way only 27% of the time (33 days; 73% when it ran with the
+# call), so day-call contracts are sold at 10:30 then: the call has been proved wrong.
+INVALIDATE = 0.0025
 UPDATE_FROM, UPDATE_UNTIL = clock(10, 30), clock(10, 45)  # once the first hour is complete
 TREND_FROM, TREND_UNTIL = clock(10, 45), clock(11, 0)  # the 10:45 scan's delayed chain shows about 10:30
 TREND_MOVE, TREND_EDGE = 0.0025, 0.25  # first hour at least 0.25%, closing in its top or bottom quarter
@@ -83,6 +100,69 @@ def load() -> dict[str, Any]:
 def _save(state: dict[str, Any]) -> None:
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.write_text(json.dumps(state, indent=1, default=float), encoding="utf-8")
+
+
+def _family(variant_id: str) -> str:
+    return next(x for x in VARIANTS if x["id"] == variant_id).get("strategy", "momentum")
+
+
+def _cash(state: dict[str, Any], variant_id: str) -> float:
+    """A variant's portfolio cash: the start, plus closed profits, less what open trades cost."""
+    cash = START_BALANCE
+    for t in state["trades"]:
+        if t["variant"] == variant_id:
+            cash += t["pnl"] if t["status"] == "closed" else -(t["entry"] * 100 + FEES[t["ticker"]])
+    return cash
+
+
+def _buy(state: dict[str, Any], v: dict[str, Any], pick: pd.Series, ref: float, why: str, **extra: Any) -> str | None:
+    """Open one contract at the real ask, if the variant's portfolio can pay for it."""
+    cost = float(pick["ask"]) * 100 + FEES[v["ticker"]]
+    if cost > _cash(state, v["id"]):
+        return f"{v['name']}: skipped, the portfolio can't cover ${cost:.0f}"
+    kind = "call" if pick["type"] == "call" else "put"
+    state["trades"].append({"variant": v["id"], "date": datetime.now(data.NEW_YORK).date().isoformat(),
+                            "ticker": v["ticker"], "type": kind, "strike": float(pick["strike"]),
+                            "symbol": pick["contractSymbol"], "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]),
+                            "spot": ref, "why": why, "status": "open", **extra,
+                            "opened": datetime.now().isoformat(timespec="minutes")})
+    return f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {kind} at ${pick['ask']:.2f}"
+
+
+def _close_on(ticker: str, d: str, cache: dict[str, pd.DataFrame]) -> float | None:
+    """The official close of `ticker` ("SPX", "SPY") on date `d`, or None while Yahoo has no good bar
+    (right after the close its daily bar can come back blank)."""
+    if ticker not in cache:
+        try:
+            daily = data.call(yf.Ticker(SOURCES[ticker][0]).history, period="1mo", interval="1d", auto_adjust=False)
+            daily.index = daily.index.tz_convert("America/New_York").date
+            cache[ticker] = daily
+        except Exception:
+            return None
+    daily, day = cache[ticker], pd.Timestamp(d).date()
+    if day not in daily.index or pd.isna(daily.loc[day, "Close"]):
+        return None
+    return float(daily.loc[day, "Close"])
+
+
+def _heal(state: dict[str, Any]) -> None:
+    """Undo anything settled or scored on a blank close, so it is redone on a good one."""
+    def blank(x: Any) -> bool:
+        return isinstance(x, float) and x != x
+    for t in state["trades"]:
+        if t["status"] == "closed" and (blank(t.get("pnl")) or blank(t.get("exit"))):
+            for k in ("exit", "close", "how", "pnl"):
+                t.pop(k, None)
+            t["status"] = "open"
+    for day in state.get("calls", {}).values():
+        for k in ("SPX", "SPY", "update"):
+            if isinstance(day.get(k), dict) and blank(day[k].get("close")):
+                day[k].pop("close", None)
+                day[k].pop("outcome", None)
+    for o in state.get("observe", {}).values():
+        if blank(o.get("close")):
+            for k in ("open", "high", "low", "close"):
+                o.pop(k, None)
 
 
 def _bars(ticker: str) -> pd.DataFrame:
@@ -168,13 +248,9 @@ def enter(state: dict[str, Any]) -> list[str]:
             record[v["id"]] = "signal, but nothing within the cap"
             continue
         pick = side.iloc[(side["strike"] - price).abs().argsort()].iloc[0]
-        trade = {"variant": v["id"], "date": today, "ticker": t, "type": "call" if call else "put",
-                 "strike": float(pick["strike"]), "symbol": pick["contractSymbol"], "entry": float(pick["ask"]),
-                 "entry_bid": float(pick["bid"]), "spot": price, "why": why, "status": "open",
-                 "opened": datetime.now().isoformat(timespec="minutes")}
-        state["trades"].append(trade)
-        record[v["id"]] = "bought"
-        notes.append(f"{v['name']}: bought {t} {trade['strike']:g} {trade['type']} at ${trade['entry']:.2f}")
+        note = _buy(state, v, pick, price, why)
+        record[v["id"]] = "skipped, portfolio too small" if "skipped" in note else "bought"
+        notes.append(note)
     state["days"][today] = record
     return notes
 
@@ -204,12 +280,17 @@ def make_call(state: dict[str, Any]) -> list[str]:
         lines.append(f"**Market {'▲ up' if v['direction'] == 'up' else '▼ down'} "
                      f"{max(v['p_up'], 1 - v['p_up']):.0%}** · {daycall.describe(v)}")
         side = "call" if v["direction"] == "up" else "put"
-        for name in ("SPX", "SPY"):
-            var = next(x for x in VARIANTS if x.get("strategy") == "daycall" and x["ticker"] == name)
+        for var in (x for x in VARIANTS if x.get("strategy") == "daycall" and not x.get("skip_quiet")):
+            name = var["ticker"]
             k = daycall.estimate_strike(c[name], name, var["cap"])
+            away = abs(k / c[name]["open"] - 1) if k else None
             lines.append(f"→ **{name}**: buy the {'SPXW' if name == 'SPX' else 'SPY'} 0DTE {side}, nearest strike out of the "
-                         f"money with an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f})" if k else "") +
-                         f"; sell at {var['target']:.0f}x or hold to the close")
+                         f"money with an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f}, {away:.2%} away" + (
+                             f", {away / v['expected_move']:.1f}x the expected move" if v.get("expected_move") else "")
+                             + ")" if k else "")
+                         + f"; sell at {var['target']:.0f}x or hold to the close")
+        lines.append("Sold at 10:30 if the first hour runs 0.25% or more against the call (such days closed the "
+                     "call's way only 27% of the time in a two-year replay).")
     else:
         lines.append(f"**No confident call: stand aside.** {daycall.describe(v)}")
     if spy_read.get("bias"):
@@ -259,13 +340,41 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
         if side.empty:
             continue
         pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
-        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if call_ else "put",
-                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
-                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
-                                "why": f"day call {c['p_up']:.0%} up", "status": "open",
-                                "opened": datetime.now().isoformat(timespec="minutes")})
-        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} at ${pick['ask']:.2f}")
+        notes.append(_buy(state, v, pick, ref, f"day call {c['p_up']:.0%} up"))
     day["entered"] = True
+    return notes
+
+
+def invalidate_calls(state: dict[str, Any]) -> list[str]:
+    """From the 10:45 scan (about 10:30 prices): sell today's day-call contracts whose first hour ran
+    INVALIDATE or more against them, a structural stop (see INVALIDATE). Zero bids are left to settle."""
+    today = datetime.now(data.NEW_YORK).date().isoformat()
+    u = (state.get("calls", {}).get(today) or {}).get("update")
+    if not u:
+        return []
+    notes, chains = [], {}
+    for t in state["trades"]:
+        if t["date"] != today or t["status"] != "open" or _family(t["variant"]) != "daycall" or t.get("stop_checked"):
+            continue
+        t["stop_checked"] = True
+        against = -u["first_hour"]["h1_ret"] * (1 if t["type"] == "call" else -1)
+        if against < INVALIDATE:
+            continue
+        try:
+            chains.setdefault(t["ticker"], data.cboe_chain(SOURCES[t["ticker"]][1])[0])
+            q = chains[t["ticker"]][chains[t["ticker"]]["contractSymbol"] == t["symbol"]]
+            bid = float(q["bid"].iloc[0])
+        except Exception:
+            continue
+        if bid <= 0:
+            continue
+        t.update(status="closed", exit=bid, stopped=True,
+                 how=f"sold at 10:30 (bid ${bid:.2f}): the first hour ran {against:.2%} against the call",
+                 pnl=round((bid - t["entry"]) * 100 - 2 * FEES[t["ticker"]], 2))
+        notes.append(f"{next(x['name'] for x in VARIANTS if x['id'] == t['variant'])}: stopped at 10:30, "
+                     f"{'+' if t['pnl'] >= 0 else '-'}${abs(t['pnl']):.0f}")
+    if notes:
+        _post_discord("🛑 Day-call stop (paper)", "The first hour proved the morning call wrong:\n" + "\n".join(notes))
     return notes
 
 
@@ -332,13 +441,8 @@ def enter_profile(state: dict[str, Any]) -> list[str]:
         pick, ref = got
         # The level is set on SPY; scale it to the index for SPX.
         level = ref * s["target"] / pr["price"] if s.get("target") else None
-        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if up else "put",
-                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
-                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
-                                "target_level": level, "why": f"{s['name']}: {s['why']}",
-                                "status": "open", "opened": datetime.now().isoformat(timespec="minutes")})
-        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {'call' if up else 'put'} at ${pick['ask']:.2f}"
-                     + (f", sell at {level:,.2f}" if level else ", hold to the close"))
+        note = _buy(state, v, pick, ref, f"{s['name']}: {s['why']}", target_level=level)
+        notes.append(note + ("" if "skipped" in note else f", sell at {level:,.2f}" if level else ", hold to the close"))
     if notes:
         _post_discord(f"📊 Market profile trade (paper): {s['name']}", "\n".join(notes))
     return notes
@@ -365,12 +469,8 @@ def enter_trend(state: dict[str, Any]) -> list[str]:
         if not got:
             continue
         pick, ref = got
-        state["trades"].append({"variant": v["id"], "date": today, "ticker": v["ticker"], "type": "call" if up else "put",
-                                "strike": float(pick["strike"]), "symbol": pick["contractSymbol"],
-                                "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]), "spot": ref,
-                                "why": f"trend day: first hour {fh['h1_ret']:+.2%}, gamma {'short' if gamma else 'not short'}",
-                                "status": "open", "opened": datetime.now().isoformat(timespec="minutes")})
-        notes.append(f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {'call' if up else 'put'} at ${pick['ask']:.2f}")
+        notes.append(_buy(state, v, pick, ref,
+                          f"trend day: first hour {fh['h1_ret']:+.2%}, gamma {'short' if gamma else 'not short'}"))
     if notes:
         _post_discord("📈 Trend-day trades (paper)", "\n".join(notes))
     return notes
@@ -478,6 +578,7 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
 def score_calls(state: dict[str, Any]) -> None:
     """After the close: did each index close above its open, and SPY above its 10:30 price?"""
     now = datetime.now(data.NEW_YORK)
+    closes: dict[str, pd.DataFrame] = {}
     pending = [d for d, o in state.get("observe", {}).items() if "close" not in o
                and not (pd.Timestamp(d).date() == now.date() and now.time() < clock(16, 5))]
     if pending:
@@ -487,7 +588,7 @@ def score_calls(state: dict[str, Any]) -> None:
         except Exception:
             daily = None
         for d in pending if daily is not None else []:
-            if pd.Timestamp(d).date() in daily.index:
+            if pd.Timestamp(d).date() in daily.index and not pd.isna(daily.loc[pd.Timestamp(d).date(), "Close"]):
                 bar = daily.loc[pd.Timestamp(d).date()]
                 state["observe"][d].update(open=float(bar["Open"]), high=float(bar["High"]),
                                            low=float(bar["Low"]), close=float(bar["Close"]))
@@ -508,29 +609,15 @@ def score_calls(state: dict[str, Any]) -> None:
                                  rest["High"].max() >= s["target"] if up else rest["Low"].min() <= s["target"]))
             except Exception:
                 pass
+        if pd.Timestamp(d).date() == now.date() and now.time() < clock(16, 5):
+            continue
         u = day.get("update")
-        if u and "outcome" not in u and not (pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date()
-                                               and datetime.now(data.NEW_YORK).time() < clock(16, 5)):
-            try:
-                daily = data.call(yf.Ticker("SPY").history, period="1mo", interval="1d")
-                daily.index = daily.index.tz_convert("America/New_York").date
-                close = float(daily.loc[pd.Timestamp(d).date(), "Close"])
-                u.update(close=close, outcome="up" if close > u["price"] else "down")
-            except Exception:
-                pass
+        if u and "outcome" not in u and (close := _close_on("SPY", d, closes)) is not None:
+            u.update(close=close, outcome="up" if close > u["price"] else "down")
         for name in ("SPX", "SPY"):
             c = day.get(name)
-            if not c or "outcome" in c:
-                continue
-            try:
-                daily = data.call(yf.Ticker(SOURCES[name][0]).history, period="1mo", interval="1d")
-                daily.index = daily.index.tz_convert("America/New_York").date
-                close = float(daily.loc[pd.Timestamp(d).date(), "Close"])
-            except Exception:
-                continue
-            if pd.Timestamp(d).date() == datetime.now(data.NEW_YORK).date() and datetime.now(data.NEW_YORK).time() < clock(16, 5):
-                continue
-            c.update(close=close, outcome="up" if close > c["open"] else "down")
+            if c and "outcome" not in c and (close := _close_on(name, d, closes)) is not None:
+                c.update(close=close, outcome="up" if close > c["open"] else "down")
 
 
 def manage(state: dict[str, Any]) -> list[str]:
@@ -541,6 +628,7 @@ def manage(state: dict[str, Any]) -> list[str]:
     if not open_trades:
         return notes
     chains: dict[str, tuple[pd.DataFrame, dict]] = {}
+    closes: dict[str, pd.DataFrame] = {}
     for t in open_trades:
         v = next(x for x in VARIANTS if x["id"] == t["variant"])
         if t["date"] == now.date().isoformat() and now.time() < clock(16, 30):
@@ -562,11 +650,8 @@ def manage(state: dict[str, Any]) -> list[str]:
                          pnl=round((bid - t["entry"]) * 100 - 2 * FEES[t["ticker"]], 2))
                 notes.append(f"{v['name']}: target hit, +${t['pnl']:.0f}")
             continue
-        try:  # settle at the official close once the day's bar exists
-            daily = data.call(yf.Ticker(SOURCES[t["ticker"]][0]).history, period="1mo", interval="1d")
-            daily.index = daily.index.tz_convert("America/New_York").date
-            close = float(daily.loc[pd.Timestamp(t["date"]).date(), "Close"])
-        except Exception:
+        close = _close_on(t["ticker"], t["date"], closes)  # settle once the day's bar is good
+        if close is None:
             continue
         value = max(close - t["strike"], 0) if t["type"] == "call" else max(t["strike"] - close, 0)
         fees = FEES[t["ticker"]] * (2 if value > 0 else 1)
@@ -590,8 +675,262 @@ def summary(state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return out
 
 
+def portfolios(state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Each variant as a paper portfolio of START_BALANCE: balance, value over time (one point per
+    trading day), return, largest drop from a high, and the win-loss record."""
+    state = state or load()
+    start = state.get("started", "")[:10] or datetime.now(data.NEW_YORK).date().isoformat()
+    days = sorted({t["date"] for t in state["trades"]} | {start})
+    out = []
+    for v in VARIANTS:
+        mine = [t for t in state["trades"] if t["variant"] == v["id"]]
+        closed = [t for t in mine if t["status"] == "closed"]
+        curve, value, peak, drop = [[f"{start}T09:30", START_BALANCE]], START_BALANCE, START_BALANCE, 0.0
+        for d in days:
+            value += sum(t["pnl"] for t in closed if t["date"] == d)
+            curve.append([f"{d}T16:00", round(value, 2)])
+            peak = max(peak, value)
+            drop = max(drop, 1 - value / peak)
+        pnls = [t["pnl"] for t in closed]
+        out.append({"id": v["id"], "name": v["name"], "family": v.get("strategy", "momentum"),
+                    "balance": round(START_BALANCE + sum(pnls), 2), "return": sum(pnls) / START_BALANCE,
+                    "trades": len(closed), "open": len(mine) - len(closed), "wins": sum(p > 0 for p in pnls),
+                    "best": max(pnls, default=None), "worst": min(pnls, default=None), "drop": drop, "curve": curve})
+    return out
+
+
+def _intraday(ticker: str, d: str, cache: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    if ticker not in cache:
+        h = data.call(yf.Ticker(SOURCES[ticker][0]).history, period="60d", interval="5m")
+        h.index = h.index.tz_convert("America/New_York")
+        cache[ticker] = h[(h.index.hour * 60 + h.index.minute >= 570) & (h.index.hour < 16)]
+    h = cache[ticker]
+    return h[h.index.date == pd.Timestamp(d).date()]
+
+
+def _held(t: dict[str, Any], close: float) -> float:
+    """What a trade would have made held to the close."""
+    value = max(close - t["strike"], 0) if t["type"] == "call" else max(t["strike"] - close, 0)
+    return round((value - t["entry"]) * 100 - FEES[t["ticker"]] * (2 if value > 0 else 1), 2)
+
+
+def review_day(state: dict[str, Any], d: str) -> dict[str, Any]:
+    """After the close: what the market did against the forecasts, how each call did, why each trade
+    won or lost (wrong way, right way but short of the strike, target, stop), and the lessons."""
+    bars: dict[str, pd.DataFrame] = {}
+    spy = _intraday("SPY", d, bars)
+    day = state.get("calls", {}).get(d) or {}
+    c, u, pr = day.get("SPY") or {}, day.get("update") or {}, (day.get("profile") or {}).get("setup") or {}
+    o, close = float(spy["Open"].iloc[0]), float(spy["Close"].iloc[-1])
+    first = spy[spy.index.hour * 60 + spy.index.minute < 630]
+    h1 = float(first["Close"].iloc[-1]) / o - 1
+    market = {"open": o, "high": float(spy["High"].max()), "low": float(spy["Low"].min()), "close": close,
+              "move": close / o - 1, "range": float(spy["High"].max() / spy["Low"].min() - 1), "h1": h1}
+    if c.get("expected_move"):
+        market.update(expected=c["expected_move"], range_label=c.get("range"),
+                      ratio=abs(market["move"]) / c["expected_move"])
+    if u.get("price") and u.get("afternoon"):
+        market.update(rest=close / u["price"] - 1, rest_expected=u["afternoon"]["expected"],
+                      rest_size=u["afternoon"]["size"])
+
+    calls = []
+    if c.get("outcome"):
+        calls.append({"name": "Day call (at the open)", "said": f"{c['direction']} {max(c['p_up'], 1 - c['p_up']):.0%}"
+                      + ("" if c["confident"] else ", not confident"), "right": c["direction"] == c["outcome"],
+                      "confident": c["confident"]})
+    if u.get("outcome"):
+        calls.append({"name": "10:30 update", "said": f"{u['direction']} {max(u['p_up'], 1 - u['p_up']):.0%}"
+                      + ("" if u["confident"] else ", not confident"), "right": u["direction"] == u["outcome"],
+                      "confident": u["confident"]})
+    if pr.get("outcome"):
+        calls.append({"name": f"Market profile: {pr['name']}", "said": pr["direction"],
+                      "right": pr["direction"] == pr["outcome"], "confident": True,
+                      "note": None if pr.get("reached") is None else ("reached its level" if pr["reached"] else "missed its level")})
+    dash = day.get("dashboard_spy") or {}
+    if dash.get("bias") in ("bullish", "bearish"):
+        calls.append({"name": "Dashboard's SPY read", "said": dash["bias"], "confident": True,
+                      "right": (dash["bias"] == "bullish") == (market["move"] > 0)})
+
+    trades = []
+    for t in (t for t in state["trades"] if t["date"] == d and t["status"] == "closed"):
+        fam, sign = _family(t["variant"]), 1 if t["type"] == "call" else -1
+        b = _intraday(t["ticker"], d, bars)
+        hh, mm = ENTRY_AT[fam]
+        after = b[b.index.hour * 60 + b.index.minute >= hh * 60 + mm]
+        last = float(b["Close"].iloc[-1])
+        dist = (t["strike"] / t["spot"] - 1) * sign
+        best = (float(after["High"].max()) / t["spot"] - 1) if sign > 0 else (1 - float(after["Low"].min()) / t["spot"])
+        went = (last / t["spot"] - 1) * sign
+        held = _held(t, t.get("close") or last)
+        if t.get("stopped"):
+            verdict = (f"Stopped at 10:30 when the first hour proved the call wrong; held to the close it would have "
+                       f"made {_usd(held)}, so the stop {'saved' if t['pnl'] > held else 'cost'} ${abs(t['pnl'] - held):.0f}")
+        elif t["how"].startswith("target"):
+            verdict = f"Won: target hit ({t['ticker']} travelled up to {best:.2%} its way)"
+        elif went <= 0:
+            verdict = (f"Wrong direction: {t['ticker']} finished {abs(went):.2%} the other way"
+                       + (f" (it did reach the strike first, {dist:.2%} away)" if best >= dist else ""))
+        elif went < dist:
+            verdict = (f"Right direction, not far enough: the strike was {dist:.2%} away; {t['ticker']} finished "
+                       f"{went:.2%} its way (best {best:.2%})")
+        elif t["pnl"] <= 0:
+            verdict = f"Past the strike, but not by enough to pay back the ${t['entry']:.2f} premium"
+        else:
+            verdict = f"Won at the close, {went:.2%} its way against a strike {dist:.2%} out"
+        trades.append({"variant": t["variant"], "name": next(x["name"] for x in VARIANTS if x["id"] == t["variant"]),
+                       "family": fam, "contract": f"{t['ticker']} {t['strike']:g} {t['type']}", "entry": t["entry"],
+                       "exit": t.get("exit"), "pnl": t["pnl"], "dist": dist, "best": best, "went": went,
+                       "reached": best >= dist, "held": held, "stopped": bool(t.get("stopped")), "verdict": verdict})
+
+    lessons = []
+    if c.get("confident") and c.get("outcome"):
+        against = -h1 * (1 if c["direction"] == "up" else -1)
+        if against >= INVALIDATE:
+            lessons.append(f"The first hour ({h1:+.2%}) overruled the morning call. In two years of replayed calls, days like "
+                           f"this closed the call's way only 27% of the time, so day-call contracts are now sold at 10:30.")
+        elif against <= -INVALIDATE:
+            lessons.append(f"The first hour ({h1:+.2%}) confirmed the morning call; replayed, such days closed the call's way 73%.")
+    far = {tr["contract"]: tr for tr in trades if tr["family"] == "daycall" and market.get("expected")
+           and tr["dist"] > 1.5 * market["expected"]}
+    if far:
+        lessons.append("Day-call strikes were " + ", ".join(
+            f"{tr['dist']:.2%} away ({k}, {tr['dist'] / market['expected']:.1f}x the forecast move)" for k, tr in far.items())
+            + f" against a forecast move of {market['expected']:.2%}. Replayed confident days travelled 1% their way only "
+              "13% of the time and 0.4% about 57%: the near-the-money SPY variant tests the fix.")
+    if market.get("ratio") is not None:
+        if market["ratio"] > 1.5:
+            lessons.append(f"A bigger day than forecast: SPY moved {abs(market['move']):.2%} open to close against "
+                           f"{market['expected']:.2%} expected ({market['ratio']:.1f}x).")
+        elif market["ratio"] < 0.5:
+            lessons.append(f"A quieter day than forecast: SPY moved {abs(market['move']):.2%} against "
+                           f"{market['expected']:.2%} expected.")
+    if market.get("rest_expected"):
+        r = abs(market["rest"]) / market["rest_expected"]
+        if r > 1.5 or r < 0.5:
+            lessons.append(f"After 10:30 SPY moved {abs(market['rest']):.2%}, against {market['rest_expected']:.2%} for a "
+                           f"'{market['rest_size']}' first hour ({r:.1f}x).")
+    for tr in trades:
+        if tr["family"] == "trend":
+            lessons.append(f"Trend day ({tr['contract']}): {'worked' if tr['pnl'] > 0 else 'failed'}, the first hour's "
+                           f"direction {'carried' if tr['went'] > 0 else 'reversed'} ({tr['went']:+.2%} after 10:30).")
+    missed = [tr for tr in trades if tr["reached"] and tr["pnl"] <= 0 and not tr["stopped"]]
+    for tr in missed:
+        lessons.append(f"{tr['name']} touched its strike ({tr['best']:.2%} its way at best) but still lost: "
+                       f"a sale on the way, not a hold to the close, would have paid.")
+    return {"date": d, "market": market, "calls": calls, "trades": trades, "lessons": lessons,
+            "pnl": round(sum(tr["pnl"] for tr in trades), 2)}
+
+
+def _usd(x: float) -> str:
+    return f"{'+' if x >= 0 else '-'}${abs(x):,.0f}"
+
+
+def describe_review(r: dict[str, Any]) -> str:
+    m = r["market"]
+    lines = [f"**SPY {m['move']:+.2%}** open to close (range {m['range']:.2%}, first hour {m['h1']:+.2%})"
+             + (f"; forecast {m['expected']:.2%}, actual {m['ratio']:.1f}x" if "ratio" in m else "")]
+    for c in r["calls"]:
+        mark = ("✅" if c["right"] else "❌") if c["confident"] else "➖"  # an unconfident call claimed nothing
+        lines.append(f"{mark} {c['name']}: {c['said']}, the day went {'its way' if c['right'] else 'the other way'}"
+                     + (f", {c['note']}" if c.get("note") else ""))
+    for t in r["trades"]:
+        lines.append(f"• {t['name']} ({t['contract']} at ${t['entry']:.2f}): **{_usd(t['pnl'])}**. {t['verdict']}")
+    if r["lessons"]:
+        lines.append("**Lessons**")
+        lines += [f"→ {x}" for x in r["lessons"]]
+    lines.append(f"Lab total today: {_usd(r['pnl'])}")
+    return "\n".join(lines)
+
+
+def review(state: dict[str, Any]) -> list[str]:
+    """Review each finished trading day once: every trade closed and the calls scored."""
+    now = datetime.now(data.NEW_YORK)
+    reviews = state.setdefault("reviews", {})
+    notes = []
+    days = sorted({t["date"] for t in state["trades"]} | set(state.get("calls", {})))
+    for d in days:
+        if d in reviews or (pd.Timestamp(d).date() == now.date() and now.time() < clock(16, 5)):
+            continue
+        if any(t["date"] == d and t["status"] == "open" for t in state["trades"]):
+            continue
+        c = (state.get("calls", {}).get(d) or {}).get("SPY") or {}
+        if c and "outcome" not in c:
+            continue
+        try:
+            r = review_day(state, d)
+        except Exception as exc:
+            notes.append(f"Review of {d} not made ({type(exc).__name__})")
+            continue
+        reviews[d] = r
+        board = portfolios(state)
+        tally = ", ".join(f"{FAMILIES[f]} {_usd(sum(p['balance'] - START_BALANCE for p in board if p['family'] == f))}"
+                          for f in FAMILIES)
+        _post_discord(f"📋 0DTE lab review, {d}", describe_review(r) + f"\nPortfolios so far: {tally}")
+        notes.append(f"Reviewed {d}: {_usd(r['pnl'])}")
+    return notes
+
+
+def lessons_scorecard(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    """What the reviews add up to: do the fixes work, and how well are direction and size forecast?"""
+    state = state or load()
+    rs = list(state.get("reviews", {}).values())
+    out: dict[str, Any] = {"days": len(rs), "families": {}, "overruled": 0, "overruled_right": 0, "stops": 0,
+                           "stop_saved": 0.0, "ratios": [], "rest_ratios": []}
+    for r in rs:
+        m = r["market"]
+        if m.get("ratio") is not None:
+            out["ratios"].append(m["ratio"])
+        if m.get("rest_expected"):
+            out["rest_ratios"].append(abs(m["rest"]) / m["rest_expected"])
+        day = (state.get("calls", {}).get(r["date"]) or {}).get("SPY") or {}
+        if day.get("confident") and day.get("outcome") and -m["h1"] * (1 if day["direction"] == "up" else -1) >= INVALIDATE:
+            out["overruled"] += 1
+            out["overruled_right"] += day["direction"] == day["outcome"]
+        for t in r["trades"]:
+            f = out["families"].setdefault(t["family"], {"trades": 0, "pnl": 0.0, "wins": 0, "reached": 0, "dist": 0.0,
+                                                         "best": 0.0, "wrong_way": 0, "short": 0})
+            f["trades"] += 1
+            f["pnl"] += t["pnl"]
+            f["wins"] += t["pnl"] > 0
+            f["reached"] += t["reached"]
+            f["dist"] += t["dist"]
+            f["best"] += t["best"]
+            f["wrong_way"] += t["went"] <= 0 and t["pnl"] <= 0
+            f["short"] += 0 < t["went"] < t["dist"] and t["pnl"] <= 0
+            if t["stopped"]:
+                out["stops"] += 1
+                out["stop_saved"] += t["pnl"] - t["held"]
+    return out
+
+
+def describe_scorecard(s: dict[str, Any]) -> list[str]:
+    """Plain sentences from lessons_scorecard."""
+    import statistics
+    if not s["days"]:
+        return ["No days reviewed yet."]
+    out = [f"{s['days']} day{'s' if s['days'] > 1 else ''} reviewed."]
+    for fam, f in s["families"].items():
+        n = f["trades"]
+        out.append(f"{FAMILIES[fam]}: {n} trade{'s' if n > 1 else ''}, {f['wins']} won, {_usd(f['pnl'])}. Strikes averaged "
+                   f"{f['dist'] / n:.2%} away and the market's best run their way {f['best'] / n:.2%}; reached the strike "
+                   f"{f['reached']} of {n}. Losses: wrong way {f['wrong_way']}, right way but short of the strike {f['short']}.")
+    if s["overruled"]:
+        out.append(f"Morning calls overruled by the first hour: {s['overruled']}, of which {s['overruled_right']} still closed "
+                   f"the call's way (27% in the replay).")
+    if s["stops"]:
+        out.append(f"10:30 stops: {s['stops']}, {'saving' if s['stop_saved'] >= 0 else 'costing'} "
+                   f"${abs(s['stop_saved']):.0f} against holding.")
+    if s["ratios"]:
+        out.append(f"Size forecast: the day's actual move ran {statistics.median(s['ratios']):.1f}x the morning forecast "
+                   f"(median; 1.15x in the two-year replay)"
+                   + (f", and the afternoon {statistics.median(s['rest_ratios']):.1f}x the 10:30 one" if s["rest_ratios"] else "")
+                   + ".")
+    return out
+
+
 def run() -> list[str]:
     state = load()
+    _heal(state)
     now = datetime.now(data.NEW_YORK)
     notes = []
     if now.weekday() < 5 and data.market_open():
@@ -609,12 +948,14 @@ def run() -> list[str]:
             except Exception as exc:
                 notes.append(f"10:30 update not made ({type(exc).__name__})")
         if TREND_FROM <= now.time() < TREND_UNTIL:
+            notes += invalidate_calls(state)
             notes += enter_trend(state)
             notes += enter_profile(state)
         if ENTRY_FROM <= now.time() < ENTRY_UNTIL:
             notes += enter(state)
     notes += manage(state)
     score_calls(state)
+    notes += review(state)
     _save(state)
     return notes
 
@@ -622,10 +963,14 @@ def run() -> list[str]:
 if __name__ == "__main__":
     if "--observations" in sys.argv:
         print("\n".join(observations_report()))
+    elif "--review" in sys.argv:
+        for d, r in sorted(load().get("reviews", {}).items()):
+            print(f"== {d}\n{describe_review(r)}\n")
+        print("\n".join(describe_scorecard(lessons_scorecard())))
     elif "--report" in sys.argv:
-        for s in summary():
-            avg = "n/a" if s["avg"] is None else f"${s['avg']:+.2f}"
-            print(f"{s['name']:45} {s['trades']} closed, {s['open']} open, {s['wins']} won, avg {avg}, total ${s['total']:+.2f}")
+        for p in portfolios():
+            print(f"{p['name']:50} ${p['balance']:>8,.2f} ({p['return']:+.1%}), {p['trades']} closed, {p['open']} open, "
+                  f"{p['wins']} won, largest drop {p['drop']:.0%}")
     else:
         for line in run() or ["0DTE lab: nothing to do"]:
             print(line)
