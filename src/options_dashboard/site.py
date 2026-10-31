@@ -1601,7 +1601,7 @@ def _zerodte_section() -> str:
         f'<p class="small">Each variant is its own paper portfolio of {_money(start, False)}, one contract a trade, skipped '
         'when the portfolio can\'t pay for it. Day-call contracts are sold at 10:30 when the first hour runs 0.25% or '
         'more against the call. Every finished day gets a review: what the market did against the forecasts, why each '
-        'trade won or lost, and the lessons, also posted to Discord.</p>'
+        'trade won or lost, and the lessons.</p>'
         f'<div class="panel">{"".join(groups)}</div>{review_html}'
         + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
            f'<th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else

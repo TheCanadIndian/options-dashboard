@@ -56,8 +56,8 @@ the user's real money.
 - **Daily Discord digest** (`digest.py`): posted once each market day by the first scan at or after
   10:00 New York (the first with live quotes): regime, pictures of the sector and Mag 7 rotation
   maps, the next week's earnings with expectations and implied moves, contracts scoring 70+, and
-  the Roth shortlist's buy-area changes. No strategy-account trades (the user asked to leave them
-  out). Test it with the scan workflow's `digest_now` input.
+  the Roth shortlist's buy-area changes. No strategy-account trades and no breakdowns of results (the 0DTE lab's
+  included): the user asked to leave them out; results live on the site. Test it with the scan workflow's `digest_now` input.
 
 - **0DTE lab** (`zerodte.py`, `daycall.py`): paper forward tests at real Cboe prices, run as a step before
   every scan. (1) The day's direction call for SPX and SPY, made at the open by a logistic model on
@@ -84,8 +84,8 @@ the user's real money.
   trend) predicted nothing. Yahoo keeps 30-minute bars only 60 days, so the long test used hourly volume
   profiles (95% the same setups).
   Each variant is a $1,000 paper portfolio (`zerodte.portfolios`; trades skipped when it can't pay). Every
-  finished day gets a review (`review_day`, run by the 17:15 research job, posted to Discord, on the Strategies
-  page): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
+  finished day gets a review (`review_day`, run by the 17:15 research job, shown on the Strategies page,
+  not Discord): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
   short of the strike, target, stop), with lessons; `lessons_scorecard` adds them up (`zerodte --review`).
   From a two-year replay of the day call (Oct 2026): a first hour 0.25%+ against a confident call left it
   right only 27% of days (33), so day-call contracts are sold at 10:30 then (`invalidate_calls`, with the

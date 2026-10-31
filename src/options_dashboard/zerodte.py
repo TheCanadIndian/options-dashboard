@@ -861,11 +861,7 @@ def review(state: dict[str, Any]) -> list[str]:
         except Exception as exc:
             notes.append(f"Review of {d} not made ({type(exc).__name__})")
             continue
-        reviews[d] = r
-        board = portfolios(state)
-        tally = ", ".join(f"{FAMILIES[f]} {_usd(sum(p['balance'] - START_BALANCE for p in board if p['family'] == f))}"
-                          for f in FAMILIES)
-        _post_discord(f"📋 0DTE lab review, {d}", describe_review(r) + f"\nPortfolios so far: {tally}")
+        reviews[d] = r  # shown on the site; the user keeps breakdowns of results out of Discord
         notes.append(f"Reviewed {d}: {_usd(r['pnl'])}")
     return notes
 

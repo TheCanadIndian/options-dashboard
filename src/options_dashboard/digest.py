@@ -272,7 +272,8 @@ def _contracts(scan: dict[str, Any]) -> dict[str, Any]:
 
 
 def _day_call() -> dict[str, Any]:
-    """Today's SPX and SPY direction call, the contract bought on it, and the scorecard."""
+    """Today's SPX and SPY direction call and the contract bought on it (results stay on the site:
+    the user asked to keep breakdowns of results out of the digest)."""
     from . import zerodte
     state = zerodte.load()
     today = datetime.now(data.NEW_YORK).date().isoformat()
@@ -297,43 +298,7 @@ def _day_call() -> dict[str, Any]:
                         f"${bought[0]['entry']:.2f} (paper; 2x target or hold)") if bought else ""
             if contract:
                 lines.append(head + contract)
-    s = zerodte.calls_scorecard(state)
-    if s["days"]:
-        if s["update"]:
-            lines.append(f"10:30 updates: confident {s['update_confident_right']} of {s['update_confident']} right; "
-                         f"all {s['update_right']} of {s['update']}")
-        for name, b in s.get("profile", {}).items():
-            lines.append(f"Market profile, {name}: closed the right way {b['right']} of {b['days']}"
-                         + (f"; reached its level {b['reached']} of {b['targets']}" if b["targets"] else ""))
-        if s["up_calls"] or s["down_calls"]:
-            lines.append(f"Up calls {s['up_right']} of {s['up_calls']} right; down calls {s['down_right']} of "
-                         f"{s['down_calls']} right")
-        if s["range"]:
-            lines.append("Range forecast: " + ", ".join(f"{k} days moved {v['move'] / v['days']:.2%} on average ({v['days']})"
-                                                      for k, v in s["range"].items()))
-        lines.append(f"\nScorecard: confident calls {s['confident_right']} of {s['confident']} right; all calls "
-                     f"{s['right']} of {s['days']}; dashboard's SPY read {s['dashboard_right']} of {s['dashboard']}")
     return {"title": "🎯 Today's direction call (SPX, SPY)", "description": "\n".join(lines)[:4000], "color": AMBER}
-
-
-def _zerodte() -> dict[str, Any]:
-    """The 0DTE lab's forward test: results per variant and the last trading day's trades."""
-    from . import zerodte
-    state = zerodte.load()
-    lines = []
-    for s in zerodte.summary(state):
-        avg = "n/a" if s["avg"] is None else f"${s['avg']:+.0f}"
-        lines.append(f"**{s['name']}**: {s['trades']} trades, {s['wins']} won, avg {avg}, total ${s['total']:+,.0f}")
-    days = sorted(state["days"])
-    if days:
-        last = days[-1]
-        trades = [t for t in state["trades"] if t["date"] == last]
-        lines.append(f"\n**{last}:** " + ("; ".join(
-            f"{t['variant']} {t['ticker']} {t['strike']:g} {t['type']} at ${t['entry']:.2f} → "
-            + (f"{'+' if t['pnl'] >= 0 else '-'}${abs(t['pnl']):.0f}" if t["status"] == "closed" else "open")
-            for t in trades) or "no signal"))
-    lines.append("Forward test at real prices of the 3:30 PM momentum rule; paper only.")
-    return {"title": "0DTE lab (end-of-day momentum)", "description": "\n".join(lines)[:4000], "color": AMBER}
 
 
 # ---------------------------------------------------------------- 4. Roth research
@@ -379,7 +344,7 @@ def build(cfg: dict[str, Any]) -> tuple[list[tuple[dict[str, Any], dict[str, byt
         ({"content": f"**📊 Daily digest · {day:%A, %B} {day.day}**", "embeds": [_day_call()]}, {}),
         ({"embeds": market}, files),
         ({"embeds": [_earnings(scan)]}, {}),
-        ({"embeds": [_contracts(scan), _zerodte()]}, {}),
+        ({"embeds": [_contracts(scan)]}, {}),
         ({"embeds": ([invest] if invest else []) + [footer]}, {}),
     ]
     for m, _ in messages:
