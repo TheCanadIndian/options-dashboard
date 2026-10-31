@@ -115,18 +115,99 @@ def _cash(state: dict[str, Any], variant_id: str) -> float:
     return cash
 
 
+def _bs(spot: float, strike: float, years: float, iv: float, call: bool) -> float:
+    from math import erf, log, sqrt
+    if years <= 0 or iv <= 0:
+        return max(spot - strike, 0) if call else max(strike - spot, 0)
+    sd = iv * sqrt(years)
+    d1 = (log(spot / strike) + 0.5 * sd * sd) / sd
+    n = lambda z: 0.5 * (1 + erf(z / sqrt(2)))  # noqa: E731
+    return spot * n(d1) - strike * n(d1 - sd) if call else strike * n(sd - d1) - spot * n(-d1)
+
+
+def _years_left(hours_ahead: float = 1.0) -> float:
+    """Trading time left in the day, in years, as of `hours_ahead` from now (at least 15 minutes)."""
+    now = datetime.now(data.NEW_YORK)
+    left = (16 - now.hour - now.minute / 60) - hours_ahead
+    return max(left, 0.25) / (252 * 6.5)
+
+
+def _level_for(premium: float, strike: float, iv: float, call: bool, ref: float) -> float:
+    """The underlying level at which the contract would be worth `premium` about an hour from now
+    (Black-Scholes at its own implied volatility); a rough guide to watch on the chart."""
+    lo, hi = (ref * 0.9, ref * 1.1)
+    years = _years_left()
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if (_bs(mid, strike, years, iv, call) < premium) == call:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def _implied(price: float, ref: float, strike: float, call: bool) -> float:
+    """The volatility that prices the contract at what was paid, now (consistent with the quote by
+    construction; the chain's own figure can be computed on a different clock)."""
+    lo, hi, years = 0.01, 5.0, _years_left(0.0)
+    if _bs(ref, strike, years, hi, call) < price:
+        return 0.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if _bs(ref, strike, years, mid, call) < price else (lo, mid)
+    return (lo + hi) / 2
+
+
+def _plan(v: dict[str, Any], pick: pd.Series, ref: float, target_level: float | None) -> dict[str, Any]:
+    """When to sell: the premium target, the level that roughly gets there, and the day call's stop."""
+    call = pick["type"] == "call"
+    iv = _implied(float(pick["ask"]), ref, float(pick["strike"]), call)
+    plan: dict[str, Any] = {}
+    if v.get("target"):
+        plan["sell_at"] = round(float(pick["ask"]) * v["target"], 2)
+        plan["sell_level"] = round(_level_for(plan["sell_at"], float(pick["strike"]), iv, call, ref), 2) if iv > 0 else \
+            round(float(pick["strike"]) + plan["sell_at"] * (1 if call else -1), 2)  # worth it at expiry
+    if target_level:
+        plan["sell_level"] = round(target_level, 2)
+        if iv > 0:
+            plan["sell_at"] = round(_bs(target_level, float(pick["strike"]), _years_left(), iv, call), 2)
+    if v.get("strategy") == "daycall":
+        plan["stop_level"] = round(ref * (1 - INVALIDATE if call else 1 + INVALIDATE), 2)
+    return plan
+
+
+def plan_text(t: dict[str, Any]) -> str:
+    """The sell plan in words, for alerts and the site."""
+    fam, call = _family(t["variant"]), t["type"] == "call"
+    above = "above" if call else "below"
+    parts = []
+    if t.get("sell_at") and fam == "profile":
+        parts.append(f"sell when {t['ticker']} reaches {t['sell_level']:,.2f} (the contract should be worth about "
+                     f"${t['sell_at']:.2f} there)")
+    elif t.get("sell_level") and fam == "profile":
+        parts.append(f"sell when {t['ticker']} reaches {t['sell_level']:,.2f}")
+    elif t.get("sell_at"):
+        parts.append(f"sell at ${t['sell_at']:.2f} ({t['sell_at'] / t['entry']:.0f}x), roughly {t['ticker']} "
+                     f"{above} {t['sell_level']:,.2f}")
+    if t.get("stop_level"):
+        parts.append(f"stop: sold at 10:30 if {t['ticker']} is {'below' if call else 'above'} {t['stop_level']:,.2f}")
+    parts.append("otherwise held to the close")
+    return "; ".join(parts)
+
+
 def _buy(state: dict[str, Any], v: dict[str, Any], pick: pd.Series, ref: float, why: str, **extra: Any) -> str | None:
     """Open one contract at the real ask, if the variant's portfolio can pay for it."""
     cost = float(pick["ask"]) * 100 + FEES[v["ticker"]]
     if cost > _cash(state, v["id"]):
         return f"{v['name']}: skipped, the portfolio can't cover ${cost:.0f}"
     kind = "call" if pick["type"] == "call" else "put"
-    state["trades"].append({"variant": v["id"], "date": datetime.now(data.NEW_YORK).date().isoformat(),
-                            "ticker": v["ticker"], "type": kind, "strike": float(pick["strike"]),
-                            "symbol": pick["contractSymbol"], "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]),
-                            "spot": ref, "why": why, "status": "open", **extra,
-                            "opened": datetime.now().isoformat(timespec="minutes")})
-    return f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {kind} at ${pick['ask']:.2f}"
+    t = {"variant": v["id"], "date": datetime.now(data.NEW_YORK).date().isoformat(),
+         "ticker": v["ticker"], "type": kind, "strike": float(pick["strike"]),
+         "symbol": pick["contractSymbol"], "entry": float(pick["ask"]), "entry_bid": float(pick["bid"]),
+         "spot": ref, "why": why, "status": "open", **extra, **_plan(v, pick, ref, extra.get("target_level")),
+         "opened": datetime.now().isoformat(timespec="minutes")}
+    state["trades"].append(t)
+    return f"{v['name']}: bought {v['ticker']} {pick['strike']:g} {kind} at ${pick['ask']:.2f}; {plan_text(t)}"
 
 
 def _close_on(ticker: str, d: str, cache: dict[str, pd.DataFrame]) -> float | None:
@@ -252,6 +333,8 @@ def enter(state: dict[str, Any]) -> list[str]:
         record[v["id"]] = "skipped, portfolio too small" if "skipped" in note else "bought"
         notes.append(note)
     state["days"][today] = record
+    if notes:
+        _post_discord("⏰ 3:30 momentum trades (paper)", "\n".join(f"• {n}" for n in notes))
     return notes
 
 
@@ -288,7 +371,7 @@ def make_call(state: dict[str, Any]) -> list[str]:
                          f"money with an ask up to ${var['cap']:.2f}" + (f" (about {k:,.0f}, {away:.2%} away" + (
                              f", {away / v['expected_move']:.1f}x the expected move" if v.get("expected_move") else "")
                              + ")" if k else "")
-                         + f"; sell at {var['target']:.0f}x or hold to the close")
+                         + f"; sell at {var['target']:.0f}x or hold to the close (exact sell levels follow once bought)")
         lines.append("Sold at 10:30 if the first hour runs 0.25% or more against the call (such days closed the "
                      "call's way only 27% of the time in a two-year replay).")
     else:
@@ -342,6 +425,8 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
         pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
         notes.append(_buy(state, v, pick, ref, f"day call {c['p_up']:.0%} up"))
     day["entered"] = True
+    if notes:
+        _post_discord("🎯 Day-call trades (paper)", "\n".join(f"• {n}" for n in notes))
     return notes
 
 
@@ -441,8 +526,7 @@ def enter_profile(state: dict[str, Any]) -> list[str]:
         pick, ref = got
         # The level is set on SPY; scale it to the index for SPX.
         level = ref * s["target"] / pr["price"] if s.get("target") else None
-        note = _buy(state, v, pick, ref, f"{s['name']}: {s['why']}", target_level=level)
-        notes.append(note + ("" if "skipped" in note else f", sell at {level:,.2f}" if level else ", hold to the close"))
+        notes.append(_buy(state, v, pick, ref, f"{s['name']}: {s['why']}", target_level=level))
     if notes:
         _post_discord(f"📊 Market profile trade (paper): {s['name']}", "\n".join(notes))
     return notes

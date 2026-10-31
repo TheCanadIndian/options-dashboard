@@ -1538,6 +1538,10 @@ def _trade(pos: dict[str, Any], commission: float) -> str:
             f'<div><span>Take profit</span><b>{take}</b></div></div>{_review(pos)}{_reasoning(pos, False)}</div>')
 
 
+def _planned(t: dict[str, Any]) -> bool:
+    return any(t.get(k) for k in ("sell_at", "sell_level", "stop_level"))
+
+
 def _zerodte_section() -> str:
     """The 0DTE lab: the forward test of the end-of-day momentum rule at real prices."""
     from . import zerodte
@@ -1585,9 +1589,15 @@ def _zerodte_section() -> str:
     recent = "".join(
         f'<tr><td class="num">{escape(t["date"])}</td><td>{escape(t["variant"])}</td>'
         f'<td>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</td><td class="num">{_money(t["entry"])}</td>'
+        f'<td class="small">{escape(zerodte.plan_text(t)) if _planned(t) else "–"}</td>'
         f'<td>{escape(t.get("how", "open"))}</td>'
         f'<td class="num">{_signed(t["pnl"]) if t["status"] == "closed" else "open"}</td></tr>'
         for t in reversed(state["trades"][-15:]))
+    live = [t for t in state["trades"] if t["status"] == "open"]
+    live_html = ("<h3>Open 0DTE trades: when to sell</h3><div class=\"panel\"><ul>" + "".join(
+        f'<li><b>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</b> bought at {_money(t["entry"])} '
+        f'({escape(next(v["name"] for v in zerodte.VARIANTS if v["id"] == t["variant"]))}): '
+        f'{escape(zerodte.plan_text(t))}</li>' for t in live) + "</ul></div>") if live else ""
     return (
         '<h2>0DTE lab: forward tests at real prices</h2>'
         '<p class="small">Each variant buys the nearest out-of-the-money 0DTE contract within its price cap, at the real ask, '
@@ -1602,9 +1612,9 @@ def _zerodte_section() -> str:
         'when the portfolio can\'t pay for it. Day-call contracts are sold at 10:30 when the first hour runs 0.25% or '
         'more against the call. Every finished day gets a review: what the market did against the forecasts, why each '
         'trade won or lost, and the lessons.</p>'
-        f'<div class="panel">{"".join(groups)}</div>{review_html}'
+        f'{live_html}<div class="panel">{"".join(groups)}</div>{review_html}'
         + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
-           f'<th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
+           f'<th>Sell plan</th><th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
            '<p class="muted small">No trades yet: the rule fires on roughly one day in four.</p>'))
 
 
