@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, time as clock
+from datetime import datetime, time as clock, timedelta
 from typing import Any
 
 import pandas as pd
@@ -725,6 +725,8 @@ def manage(state: dict[str, Any]) -> list[str]:
             if q.empty:
                 continue
             bid, spot = float(q["bid"].iloc[0]), quote.get("price")
+            t.update(last_bid=bid, last_ask=float(q["ask"].iloc[0]), last_spot=spot, peak_bid=max(t.get("peak_bid", 0.0), bid),
+                     last_at=(now - timedelta(minutes=15)).strftime("%H:%M"))  # the quotes are 15 minutes delayed
             if t.get("target_level"):  # profile trades: the underlying reached the setup's level
                 hit = spot is not None and (spot >= t["target_level"] if t["type"] == "call" else spot <= t["target_level"])
             else:
@@ -759,9 +761,16 @@ def summary(state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return out
 
 
+def mark(t: dict[str, Any]) -> float | None:
+    """An open trade's profit if sold at its last bid, after fees; None before its first snapshot."""
+    if t.get("last_bid") is None:
+        return None
+    return round((t["last_bid"] - t["entry"]) * 100 - FEES[t["ticker"]] * (2 if t["last_bid"] > 0 else 1), 2)
+
+
 def portfolios(state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Each variant as a paper portfolio of START_BALANCE: balance, value over time (one point per
-    trading day), return, largest drop from a high, and the win-loss record."""
+    """Each variant as a paper portfolio of START_BALANCE, open trades valued at their last bid: balance,
+    value over time (one point per trading day), return, largest drop from a high, and the win-loss record."""
     state = state or load()
     start = state.get("started", "")[:10] or datetime.now(data.NEW_YORK).date().isoformat()
     days = sorted({t["date"] for t in state["trades"]} | {start})
@@ -776,8 +785,10 @@ def portfolios(state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
             peak = max(peak, value)
             drop = max(drop, 1 - value / peak)
         pnls = [t["pnl"] for t in closed]
+        marks = sum(mark(t) or 0.0 for t in mine if t["status"] == "open")  # open trades, at their last bid
+        curve[-1][1] = round(curve[-1][1] + marks, 2)
         out.append({"id": v["id"], "name": v["name"], "family": v.get("strategy", "momentum"),
-                    "balance": round(START_BALANCE + sum(pnls), 2), "return": sum(pnls) / START_BALANCE,
+                    "balance": round(START_BALANCE + sum(pnls) + marks, 2), "return": (sum(pnls) + marks) / START_BALANCE,
                     "trades": len(closed), "open": len(mine) - len(closed), "wins": sum(p > 0 for p in pnls),
                     "best": max(pnls, default=None), "worst": min(pnls, default=None), "drop": drop, "curve": curve})
     return out

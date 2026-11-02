@@ -83,7 +83,8 @@ the user's real money.
   variants (sold when the underlying reaches the level), scored daily. Yesterday's profile shape (P, b, D,
   trend) predicted nothing. Yahoo keeps 30-minute bars only 60 days, so the long test used hourly volume
   profiles (95% the same setups).
-  Each variant is a $1,000 paper portfolio (`zerodte.portfolios`; trades skipped when it can't pay). Every
+  Each variant is a $1,000 paper portfolio (`zerodte.portfolios`; trades skipped when it can't pay; open trades
+  valued at the last bid, which `manage` stores each scan and the Strategies page shows). Every
   finished day gets a review (`review_day`, run by the 17:15 research job, shown on the Strategies page,
   not Discord): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
   short of the strike, target, stop), with lessons; `lessons_scorecard` adds them up (`zerodte --review`).

@@ -1591,13 +1591,36 @@ def _zerodte_section() -> str:
         f'<td>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</td><td class="num">{_money(t["entry"])}</td>'
         f'<td class="small">{escape(zerodte.plan_text(t)) if _planned(t) else "–"}</td>'
         f'<td>{escape(t.get("how", "open"))}</td>'
-        f'<td class="num">{_signed(t["pnl"]) if t["status"] == "closed" else "open"}</td></tr>'
+        f'<td class="num">{_signed(t["pnl"]) if t["status"] == "closed" else _signed(zerodte.mark(t)) + " now" if zerodte.mark(t) is not None else "open"}</td></tr>'
         for t in reversed(state["trades"][-15:]))
-    live = [t for t in state["trades"] if t["status"] == "open"]
-    live_html = ("<h3>Open 0DTE trades: when to sell</h3><div class=\"panel\"><ul>" + "".join(
-        f'<li><b>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</b> bought at {_money(t["entry"])} '
-        f'({escape(next(v["name"] for v in zerodte.VARIANTS if v["id"] == t["variant"]))}): '
-        f'{escape(zerodte.plan_text(t))}</li>' for t in live) + "</ul></div>") if live else ""
+    held: dict[tuple, list] = {}  # variants holding the same contract at the same price share a card
+    for t in state["trades"]:
+        if t["status"] == "open":
+            held.setdefault((t["symbol"], t["entry"]), []).append(t)
+    names = {v["id"]: v["name"] for v in zerodte.VARIANTS}
+
+    def live_card(group: list[dict[str, Any]]) -> str:
+        t, m = group[0], zerodte.mark(group[0])
+        pl = "waiting for the next scan" if m is None else (
+            f'<span class="{"up" if m >= 0 else "down"}">{_signed(m)} ({t["last_bid"] / t["entry"] - 1:+.0%})</span>')
+        facts = [("Paid", _money(t["entry"]))]
+        if t.get("last_bid") is not None:
+            facts += [(f'Bid at {t["last_at"]}', _money(t["last_bid"]) if t["last_bid"] > 0 else "no bid"),
+                      ("Best bid so far", _money(t["peak_bid"]))]
+            if t.get("last_spot"):
+                facts.append((f'{t["ticker"]} then', f'{t["last_spot"]:,.2f}'))
+        if t.get("sell_at"):
+            facts.append(("Sell at", _money(t["sell_at"])))
+        return (f'<div class="trade"><div class="trade-head"><b>{escape(t["ticker"])} {t["strike"]:g} {escape(t["type"])}</b>'
+                f'<span class="pl">{pl}</span></div><div class="facts">'
+                + "".join(f"<div><span>{escape(k)}</span><b>{v}</b></div>" for k, v in facts)
+                + f'</div><p class="small muted">{escape(zerodte.plan_text(t))}. '
+                  f'{escape("; ".join(names[x["variant"]] for x in group))}</p></div>')
+
+    live_html = ('<h3>Open 0DTE trades</h3><div class="panel">'
+                 '<p class="small muted">Updated every scan, about every 15 minutes, from quotes 15 minutes delayed. The time '
+                 'shown is the market moment each bid reflects. Profit is what selling at that bid would make, after fees.</p>'
+                 + "".join(live_card(g) for g in held.values()) + "</div>") if held else ""
     return (
         '<h2>0DTE lab: forward tests at real prices</h2>'
         '<p class="small">Each variant buys the nearest out-of-the-money 0DTE contract within its price cap, at the real ask, '
