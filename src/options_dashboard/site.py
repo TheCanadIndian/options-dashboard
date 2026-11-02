@@ -24,39 +24,41 @@ FACTOR_LABELS = {
 LEGACY_WEIGHTS = {"trend": 30, "liquidity": 20, "breakeven": 15, "iv_value": 15, "theta": 10, "delta": 10}
 
 CSS = """
-:root{color-scheme:dark;--page:#000;--surface:#0b0b0b;--head:#140e03;--ink:#e9e9e6;--ink2:#b3b3ad;--muted:#7d7d78;
---amber:#ffa028;--amber2:#ffbe5c;--grid:#1c1c1b;--axis:#3a3a38;--border:#272725;--series:#ffa028;--good:#2fd36b;
---bad:#ff5252;--track:#232321;--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;
---s7:#9085e9;--s8:#e66767;--q-lead:#199e70;--q-weak:#c98500;--q-lag:#e66767;--q-imp:#3987e5;
+:root{color-scheme:dark;--page:#0A0F12;--surface:#111A1F;--raised:#0E161B;--head:#18242B;--ink:#EAF1F4;--ink2:#BCCAD1;
+--muted:#95A6B0;--accent:#36D399;--accent2:#9ED9B6;--grid:#1C2A32;--axis:#3D4F5A;--border:#22313A;--series:#36D399;
+--good:#34D27A;--bad:#F04848;--track:#18242B;--s1:#6CB4FF;--s2:#F2C14E;--s3:#36D399;--s4:#F26464;--s5:#B4BCC2;
+--s6:#9ED9B6;--s7:#9085E9;--s8:#E9A3A3;--q-lead:#36D399;--q-weak:#F2C14E;--q-lag:#F26464;--q-imp:#6CB4FF;
 --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace}
 *{box-sizing:border-box}
 body{margin:0;background:var(--page);color:var(--ink);font:13px/1.45 var(--mono);font-variant-numeric:tabular-nums}
-a{color:var(--amber2)}
+a{color:var(--accent2)}
 main{max-width:1240px;margin:0 auto;padding:10px 14px 28px}
-.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#0d0d0c;
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:var(--raised);
 border-bottom:1px solid var(--border);padding:6px 14px;font-size:12px}
-.brand{color:#000;background:var(--amber);font-weight:700;padding:2px 8px;letter-spacing:.08em}
-.topbar .clock{color:var(--ink2)}.topbar .clock b{color:var(--amber)}
-.tape{overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--border);background:#050505;font-size:12px}
+.brand{color:var(--page);background:var(--accent);font-weight:700;padding:2px 8px;letter-spacing:.08em}
+.topbar .clock{color:var(--ink2)}.topbar .clock b{color:var(--accent)}
+.tape{overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--border);background:var(--page);font-size:12px}
 .tape .roll{display:inline-block;padding:5px 0;animation:roll 60s linear infinite}
-.tape span.q{margin:0 18px}.tape .sym{color:var(--amber);font-weight:600;margin-right:6px}
+.tape span.q{margin:0 18px}.tape .sym{color:var(--accent);font-weight:600;margin-right:6px}
 @keyframes roll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){.tape{overflow-x:auto}.tape .roll{animation:none}}
 nav{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0 12px}
 main>*{min-width:0}
 nav a{padding:7px 12px;border:1px solid var(--border);color:var(--ink2);text-decoration:none;font-size:12px;
-letter-spacing:.06em;background:#0d0d0c}
-nav a b{color:var(--amber);margin-right:6px}
-nav a[aria-current]{background:var(--amber);color:#000;border-color:var(--amber)}nav a[aria-current] b{color:#000}
-h1{font-size:15px;margin:0;color:var(--amber);text-transform:uppercase;letter-spacing:.1em}
-h2{font-size:12px;margin:22px 0 8px;color:var(--amber);text-transform:uppercase;letter-spacing:.12em;
-background:var(--head);border-left:3px solid var(--amber);padding:5px 8px}
-h3{font-size:13px}h4{color:var(--amber2)}
+letter-spacing:.06em;background:var(--raised)}
+nav a b{color:var(--accent);margin-right:6px}
+.subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:12px 0 0}.subtabs a{padding:6px 12px;border:1px solid var(--border);color:var(--ink2);text-decoration:none;font-size:12px;background:var(--raised)}
+.subtabs a[aria-current]{color:var(--accent);border-color:var(--accent)}
+nav a[aria-current]{background:var(--accent);color:var(--page);border-color:var(--accent)}nav a[aria-current] b{color:var(--page)}
+h1{font-size:15px;margin:0;color:var(--accent);text-transform:uppercase;letter-spacing:.1em}
+h2{font-size:12px;margin:22px 0 8px;color:var(--accent);text-transform:uppercase;letter-spacing:.12em;
+background:var(--head);border-left:3px solid var(--accent);padding:5px 8px}
+h3{font-size:13px}h4{color:var(--accent2)}
 .sub{color:var(--muted);margin:3px 0 0;font-size:12px}.muted{color:var(--muted)}.small{font-size:11.5px}
 .notice{border:1px solid var(--border);padding:8px 10px;margin:12px 0 0;color:var(--ink2);font-size:12px;background:var(--surface)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;margin-top:10px}
 .tile,.card,.panel{background:var(--surface);border:1px solid var(--border)}
-.tile{padding:8px 10px}.tile .k{color:var(--amber);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em}
+.tile{padding:8px 10px}.tile .k{color:var(--accent);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em}
 .tile .v{font-size:20px;font-weight:600;margin:2px 0}.tile .d{font-size:11.5px;color:var(--muted)}
 .up{color:var(--good)}.down{color:var(--bad)}
 .panel{padding:10px}
@@ -67,53 +69,53 @@ border-bottom:1px solid var(--border);padding-bottom:6px}
 .card h3{margin:0;font-size:13px;color:var(--ink);text-transform:uppercase;letter-spacing:.04em}
 .pl{font-size:13px;font-weight:600;white-space:nowrap}
 .tags{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0 0}
-.tag{border:1px solid #4a3410;color:var(--amber2);padding:0 6px;font-size:11px;text-transform:uppercase}
+.tag{border:1px solid var(--axis);color:var(--accent2);padding:0 6px;font-size:11px;text-transform:uppercase}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:6px 10px;margin:8px 0 0}
-.facts div span{display:block;color:var(--amber);font-size:10.5px;text-transform:uppercase}.facts div b{font-weight:600}
+.facts div span{display:block;color:var(--accent);font-size:10.5px;text-transform:uppercase}.facts div b{font-weight:600}
 .range{margin:16px 0 4px}.bar{position:relative;height:4px;background:var(--track)}
 .bar i{position:absolute;top:-4px;width:2px;height:12px;background:var(--muted)}
-.bar u{position:absolute;top:-5px;width:14px;height:14px;margin-left:-7px;background:var(--amber);border:2px solid var(--surface)}
+.bar u{position:absolute;top:-5px;width:14px;height:14px;margin-left:-7px;background:var(--accent);border:2px solid var(--surface)}
 .ends{display:flex;justify-content:space-between;font-size:11px;color:var(--ink2);margin-top:6px}
-.review{margin:10px 0 0;padding:6px 8px;border-left:3px solid var(--amber);background:#0f0b04;font-size:12px;color:var(--ink2)}
+.review{margin:10px 0 0;padding:6px 8px;border-left:3px solid var(--accent);background:var(--head);font-size:12px;color:var(--ink2)}
 .review b{color:var(--ink)}
 details{margin-top:8px;border-top:1px solid var(--border);padding-top:4px}
-summary{cursor:pointer;font-weight:600;padding:10px 0;min-height:24px;color:var(--amber2);text-transform:uppercase;
+summary{cursor:pointer;font-weight:600;padding:10px 0;min-height:24px;color:var(--accent2);text-transform:uppercase;
 font-size:11.5px;letter-spacing:.06em}
 details h4{margin:10px 0 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
 details ul{margin:0;padding-left:16px}details li{margin:2px 0}
 ul.plain{list-style:none;padding:0}
 .pts{display:grid;grid-template-columns:minmax(120px,1.3fr) 1fr auto;gap:4px 10px;align-items:center;font-size:12px}
-.pts .b{height:4px;background:var(--track);overflow:hidden}.pts .b span{display:block;height:100%;background:var(--amber)}
+.pts .b{height:4px;background:var(--track);overflow:hidden}.pts .b span{display:block;height:100%;background:var(--accent)}
 .pts .n{color:var(--ink2)}
 table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #161615;vertical-align:top}
-th{color:var(--amber);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
-border-bottom:1px solid #3a2a0c;background:#0e0b05}
-tbody tr:nth-child(even){background:#070707}tbody tr:hover{background:#17130a}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--grid);vertical-align:top}
+th{color:var(--accent);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+border-bottom:1px solid var(--axis);background:var(--head)}
+tbody tr:nth-child(even){background:var(--raised)}tbody tr:hover{background:var(--head)}
 td.num{white-space:nowrap}
 .scroll{overflow-x:auto}
-td a{color:var(--amber2);text-decoration:none}td a:hover{text-decoration:underline}
+td a{color:var(--accent2);text-decoration:none}td a:hover{text-decoration:underline}
 .sortable th{cursor:pointer;white-space:nowrap;user-select:none}
 .sortable th[data-dir=asc]::after{content:" ▲"}.sortable th[data-dir=desc]::after{content:" ▼"}
 .sortable td{white-space:nowrap}
 .filters{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px;color:var(--ink2)}
-.filters input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin:0 6px 0 0;accent-color:var(--amber)}
+.filters input[type=checkbox]{width:20px;height:20px;vertical-align:middle;margin:0 6px 0 0;accent-color:var(--accent)}
 .filters label{display:inline-flex;align-items:center;min-height:36px}
-.filters select{font:inherit;padding:6px 8px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border)}
-.card:target{outline:1px solid var(--amber)}
+.filters select{font:inherit;padding:6px 8px;background:var(--raised);color:var(--ink);border:1px solid var(--border)}
+.card:target{outline:1px solid var(--accent)}
 details.acct{margin:0;padding:0 10px;border-top:1px solid var(--border);align-self:start}
 details.acct>summary{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;list-style:none;
 text-transform:none;color:var(--ink);font-weight:400}
 details.acct>summary::-webkit-details-marker{display:none}
 .acct-name{font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:13px}
-.acct-name::before{content:"▸ ";color:var(--amber)}details.acct[open] .acct-name::before{content:"▾ "}
+.acct-name::before{content:"▸ ";color:var(--accent)}details.acct[open] .acct-name::before{content:"▾ "}
 .acct-sub{grid-column:1/-1;color:var(--muted);font-size:11.5px}
 details.acct[open]>summary{border-bottom:1px solid var(--border);margin-bottom:4px}
-.trade{border-top:1px solid #1c1c1b;padding:8px 0}.trade:first-of-type{border-top:0}
+.trade{border-top:1px solid var(--grid);padding:8px 0}.trade:first-of-type{border-top:0}
 .trade-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px}
 .trade .facts{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
 .acct-tools{display:flex;gap:6px;margin:0 0 8px}
-.acct-tools button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--amber2);border:1px solid var(--border);
+.acct-tools button{font:inherit;font-size:11.5px;background:var(--raised);color:var(--accent2);border:1px solid var(--border);
 padding:5px 10px;min-height:30px;cursor:pointer}
 .dbar{position:relative;height:6px;background:var(--track)}
 .dbar span{position:absolute;top:0;height:6px}.dbar i{position:absolute;left:50%;top:-3px;width:1px;height:12px;background:var(--axis)}
@@ -121,34 +123,34 @@ padding:5px 10px;min-height:30px;cursor:pointer}
 .legend i{display:inline-block;width:9px;height:9px;margin-right:6px}
 .linechart{position:relative}.linechart svg{display:block;width:100%;height:auto}
 svg text{font-family:var(--mono)}
-.tip{position:absolute;pointer-events:none;background:#0d0d0c;border:1px solid var(--amber);padding:4px 8px;
+.tip{position:absolute;pointer-events:none;background:var(--raised);border:1px solid var(--accent);padding:4px 8px;
 font-size:11.5px;white-space:nowrap;display:none}
-.statusbar{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:24px;padding:6px 10px;background:#0d0d0c;
+.statusbar{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:24px;padding:6px 10px;background:var(--raised);
 border:1px solid var(--border);font-size:11.5px;color:var(--ink2)}
-.statusbar b{color:var(--amber);font-weight:600;margin-right:4px}
+.statusbar b{color:var(--accent);font-weight:600;margin-right:4px}
 footer{margin-top:8px;color:var(--muted);font-size:11px}
-.overlay-toggle{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--ink2);border:1px solid var(--border);
+.overlay-toggle{font:inherit;font-size:11.5px;background:var(--raised);color:var(--ink2);border:1px solid var(--border);
 padding:5px 10px;min-height:30px;cursor:pointer;margin:0 0 6px;letter-spacing:.04em}
 .overlay-toggle i{display:inline-block;width:9px;height:9px;margin-right:6px;opacity:.4}
 .overlay-toggle[aria-pressed=true]{border-color:var(--s1);color:var(--ink)}.overlay-toggle[aria-pressed=true] i{opacity:1}
-.overlay-toggle::before{content:"+ ";color:var(--amber)}.overlay-toggle[aria-pressed=true]::before{content:"✓ "}
+.overlay-toggle::before{content:"+ ";color:var(--accent)}.overlay-toggle[aria-pressed=true]::before{content:"✓ "}
 .rg-toggle{display:flex;gap:0;margin:0 0 10px}
 .rg-toggle input{position:absolute;opacity:0;pointer-events:none}
-.rg-toggle label{padding:7px 14px;min-height:32px;border:1px solid var(--border);background:#0d0d0c;color:var(--ink2);
+.rg-toggle label{padding:7px 14px;min-height:32px;border:1px solid var(--border);background:var(--raised);color:var(--ink2);
 cursor:pointer;font-size:12px;letter-spacing:.06em;text-transform:uppercase}
-.rg-toggle input:checked+label{background:var(--amber);border-color:var(--amber);color:#000;font-weight:600}
-.rg-toggle input:focus-visible+label{outline:2px solid var(--amber2);outline-offset:2px}
+.rg-toggle input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--page);font-weight:600}
+.rg-toggle input:focus-visible+label{outline:2px solid var(--accent2);outline-offset:2px}
 .rg:has(.rg-toggle) .rg-pane{display:none}
 .q-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;font-size:12px}
-.q-chip{border:1px solid;border-left-width:3px;padding:5px 9px;background:#0d0d0c;color:var(--ink);font:inherit;
-font-size:12px;cursor:pointer;text-align:left;min-height:32px}.q-chip:hover{background:#17130a}
+.q-chip{border:1px solid;border-left-width:3px;padding:5px 9px;background:var(--raised);color:var(--ink);font:inherit;
+font-size:12px;cursor:pointer;text-align:left;min-height:32px}.q-chip:hover{background:var(--head)}
 .rg-filter{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
-.rg-filter button{font:inherit;font-size:11.5px;background:#0d0d0c;color:var(--ink);border:1px solid var(--border);
+.rg-filter button{font:inherit;font-size:11.5px;background:var(--raised);color:var(--ink);border:1px solid var(--border);
 padding:4px 8px;min-height:30px;cursor:pointer;letter-spacing:.04em}
-.rg-filter button:hover{border-color:var(--amber)}
+.rg-filter button:hover{border-color:var(--accent)}
 .rg-filter button i{display:inline-block;width:9px;height:9px;margin-right:6px}
 .rg-filter button[aria-pressed=false]{opacity:.38;text-decoration:line-through}
-.rg-filter button[data-all]{color:var(--amber2)}
+.rg-filter button[data-all]{color:var(--accent2)}
 .rg:has(#rg-sec:checked) .rg-sec,.rg:has(#rg-mag7:checked) .rg-mag7{display:block}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
 .grid2>section>h2:first-child{margin-top:22px}
@@ -583,6 +585,15 @@ draw()});draw()});
 """
 
 
+STRATEGY_TABS = (("Strategy race", "strategies.html"), ("0DTE lab", "zerodte.html"))
+
+
+def _strategy_tabs(active: str) -> str:
+    return '<div class="subtabs" aria-label="Strategy pages">' + "".join(
+        f'<a href="{href}"{" aria-current=\"page\"" if href == active else ""}>{name}</a>'
+        for name, href in STRATEGY_TABS) + "</div>"
+
+
 def _nav(active: str) -> str:
     return "".join(
         f'<a href="{href}"{" aria-current=\"page\"" if name == active else ""}><b>{n}</b>{code}</a>'
@@ -596,7 +607,8 @@ def refresh_nav() -> None:
     import re
     for page in OUT.parent.glob("*.html"):
         html = page.read_text(encoding="utf-8")
-        current = next((name for name, _, href in NAV if href == page.name), None)
+        current = "Strategies" if page.name == "zerodte.html" else next(
+            (name for name, _, href in NAV if href == page.name), None)
         if current is None:
             continue
         new = re.sub(r'(<nav aria-label="Pages">).*?(</nav>)', lambda m: m.group(1) + _nav(current) + m.group(2),
@@ -605,7 +617,7 @@ def refresh_nav() -> None:
             page.write_text(new, encoding="utf-8")
 
 
-def _page(active: str, sub: str, body: str, script: str) -> str:
+def _page(active: str, sub: str, body: str, script: str, heading: str | None = None) -> str:
     _load_chrome()
     nav = _nav(active)
     return f"""<!doctype html>
@@ -613,7 +625,7 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <meta http-equiv="refresh" content="300">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#0A0F12">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <title>Options {active}</title><style>{CSS}</style></head>
@@ -622,7 +634,7 @@ def _page(active: str, sub: str, body: str, script: str) -> str:
 {_chrome["tape"]}
 <main>
 <nav aria-label="Pages">{nav}</nav>
-<h1>{TITLES[active]}</h1>
+<h1>{heading or TITLES[active]}</h1>
 <p class="sub">{sub}</p>
 {body}
 {_chrome["status"]}
@@ -1542,8 +1554,8 @@ def _planned(t: dict[str, Any]) -> bool:
     return any(t.get(k) for k in ("sell_at", "sell_level", "stop_level"))
 
 
-def _zerodte_section() -> str:
-    """The 0DTE lab: the forward test of the end-of-day momentum rule at real prices."""
+def render_zerodte() -> str:
+    """The 0DTE lab's page: open contracts, portfolios, the latest review and the trades."""
     from . import zerodte
     state = zerodte.load()
     board = zerodte.portfolios(state)
@@ -1577,7 +1589,7 @@ def _zerodte_section() -> str:
                          f'{_signed(t["pnl"])}. {escape(t["verdict"])}</li>' for t in latest["trades"])
         lessons = "".join(f"<li>{escape(x)}</li>" for x in latest["lessons"])
         review_html = (
-            f'<h3>Daily review: {_day(latest["date"])}</h3><div class="panel"><p>SPY {m["move"]:+.2%} open to close, range '
+            f'<h2>Daily review: {_day(latest["date"])}</h2><div class="panel"><p>SPY {m["move"]:+.2%} open to close, range '
             f'{m["range"]:.2%}, first hour {m["h1"]:+.2%}'
             + (f'; the morning forecast was {m["expected"]:.2%}, so the day ran {m["ratio"]:.1f}x it' if "ratio" in m else "")
             + f'.</p><h4>The calls</h4><ul>{calls or "<li>None scored</li>"}</ul>'
@@ -1617,13 +1629,13 @@ def _zerodte_section() -> str:
                 + f'</div><p class="small muted">{escape(zerodte.plan_text(t))}. '
                   f'{escape("; ".join(names[x["variant"]] for x in group))}</p></div>')
 
-    live_html = ('<h3>Open 0DTE trades</h3><div class="panel">'
+    live_html = ('<h2>Open trades</h2><div class="panel">'
                  '<p class="small muted">Updated every scan, about every 15 minutes, from quotes 15 minutes delayed. The time '
                  'shown is the market moment each bid reflects. Profit is what selling at that bid would make, after fees.</p>'
                  + "".join(live_card(g) for g in held.values()) + "</div>") if held else ""
-    return (
-        '<h2>0DTE lab: forward tests at real prices</h2>'
-        '<p class="small">Each variant buys the nearest out-of-the-money 0DTE contract within its price cap, at the real ask, '
+    body = (
+        _strategy_tabs("zerodte.html")
+        +         '<p class="small">Each variant buys the nearest out-of-the-money 0DTE contract within its price cap, at the real ask, '
         'one contract, paper only. <b>Day call</b>: the morning direction call, bought at the open. <b>Trend day</b>: a '
         'strong first hour closing near its extreme, bought at about 10:30, with and without a dealers-short-gamma filter. '
         '<b>Market profile</b>: at 10:30, the 80% rule (opened outside yesterday\'s 30-minute value area and back inside '
@@ -1635,10 +1647,12 @@ def _zerodte_section() -> str:
         'when the portfolio can\'t pay for it. Day-call contracts are sold at 10:30 when the first hour runs 0.25% or '
         'more against the call. Every finished day gets a review: what the market did against the forecasts, why each '
         'trade won or lost, and the lessons.</p>'
-        f'{live_html}<div class="panel">{"".join(groups)}</div>{review_html}'
+        f'{live_html}<h2>Portfolios</h2><div class="panel">{"".join(groups)}</div>{review_html}<h2>Latest trades</h2>'
         + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
            f'<th>Sell plan</th><th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
            '<p class="muted small">No trades yet: the rule fires on roughly one day in four.</p>'))
+    return _page("Strategies", "Same-day SPX and SPY forward tests at real prices, paper only.", body,
+                 TABLE_JS + MULTI_JS, "0DTE Lab")
 
 
 def render_strategies(cfg: dict[str, Any]) -> str:
@@ -1696,9 +1710,8 @@ def render_strategies(cfg: dict[str, Any]) -> str:
             f'<h4>Open positions</h4>{open_rows or "<p class=muted>None</p>"}'
             f'<h4>Latest closed trades</h4>{closed_rows or "<p class=muted>None yet</p>"}</details>')
 
-    body = f"""<h2>Leaderboard</h2>{table}
+    body = f"""{_strategy_tabs("strategies.html")}<h2>Leaderboard</h2>{table}
 <h2>Value over time</h2><div class="panel">{chart}</div>
-{_zerodte_section()}
 <h2>Each strategy</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(cards)}</div>
 <p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the
@@ -1712,6 +1725,7 @@ def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | N
     set_chrome(result, state, cfg)
     OUT.with_name("portfolio.html").write_text(render(state, cfg), encoding="utf-8")
     OUT.with_name("strategies.html").write_text(render_strategies(cfg), encoding="utf-8")
+    OUT.with_name("zerodte.html").write_text(render_zerodte(), encoding="utf-8")
     if result is not None:
         OUT.write_text(render_home(result, state, cfg), encoding="utf-8")
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")

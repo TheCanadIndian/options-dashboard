@@ -26,7 +26,8 @@ the user's real money.
   page never shows their holdings or dollar amounts. Frame it as research, not advice. Schwab's
   fractional shares (Stock Slices) cover only the S&P 500; anything else is whole shares.
 - They like plain-language explanations ("explain it like I'm 5" when asked), mobile-friendly
-  pages, and the Bloomberg-terminal look of the site.
+  pages, and the terminal layout of the site, in the colours of their betting pages (slate
+  background, mint accent, since Nov 2026; `D:ootball`, tokens at the top of `site.CSS`).
 
 ## How it runs (no PC needed)
 
@@ -84,9 +85,9 @@ the user's real money.
   trend) predicted nothing. Yahoo keeps 30-minute bars only 60 days, so the long test used hourly volume
   profiles (95% the same setups).
   Each variant is a $1,000 paper portfolio (`zerodte.portfolios`; trades skipped when it can't pay; open trades
-  valued at the last bid, which `manage` stores each scan and the Strategies page shows). Every
-  finished day gets a review (`review_day`, run by the 17:15 research job, shown on the Strategies page,
-  not Discord): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
+  valued at the last bid, which `manage` stores each scan and the lab page shows). Every
+  finished day gets a review (`review_day`, run by the 17:15 research job, shown on the 0DTE lab page,
+  `docs/zerodte.html`, a sub-tab of Strategies, not Discord): the market against the forecasts, each call, and why each trade won or lost (wrong way, right way but
   short of the strike, target, stop), with lessons; `lessons_scorecard` adds them up (`zerodte --review`).
   From a two-year replay of the day call (Oct 2026): a first hour 0.25%+ against a confident call left it
   right only 27% of days (33), so day-call contracts are sold at 10:30 then (`invalidate_calls`, with the
