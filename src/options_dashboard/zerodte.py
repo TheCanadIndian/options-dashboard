@@ -72,6 +72,10 @@ VARIANTS = [
      "target": 2.0, "strategy": "trend"},
     {"id": "profile_spy150", "name": "Market profile: SPY, up to $150, near the money", "ticker": "SPY", "cap": 1.50,
      "strategy": "profile"},
+    # The projected reach as the exit (added Nov 4, 2026): sold when SPY reaches the morning's likely level
+    # in the call's direction (touched about two days in three; daycall.REACH_LIKELY), not at a premium multiple.
+    {"id": "day_spy150_reach", "name": "Day call: SPY, up to $150, sold at the projected reach", "ticker": "SPY",
+     "cap": 1.50, "strategy": "daycall", "exit": "reach"},
 ]
 FAMILIES = {"daycall": "Day call", "trend": "Trend day", "profile": "Market profile", "momentum": "End-of-day momentum"}
 ENTRY_AT = {"daycall": (9, 30), "trend": (10, 30), "profile": (10, 30), "momentum": (15, 30)}  # what the quotes show
@@ -178,13 +182,13 @@ def _plan(v: dict[str, Any], pick: pd.Series, ref: float, target_level: float | 
 
 def plan_text(t: dict[str, Any]) -> str:
     """The sell plan in words, for alerts and the site."""
-    fam, call = _family(t["variant"]), t["type"] == "call"
+    call = t["type"] == "call"
     above = "above" if call else "below"
     parts = []
-    if t.get("sell_at") and fam == "profile":
+    if t.get("sell_at") and t.get("target_level"):
         parts.append(f"sell when {t['ticker']} reaches {t['sell_level']:,.2f} (the contract should be worth about "
                      f"${t['sell_at']:.2f} there)")
-    elif t.get("sell_level") and fam == "profile":
+    elif t.get("sell_level") and t.get("target_level"):
         parts.append(f"sell when {t['ticker']} reaches {t['sell_level']:,.2f}")
     elif t.get("sell_at"):
         parts.append(f"sell at ${t['sell_at']:.2f} ({t['sell_at'] / t['entry']:.0f}x), roughly {t['ticker']} "
@@ -224,6 +228,17 @@ def _close_on(ticker: str, d: str, cache: dict[str, pd.DataFrame]) -> float | No
     if day not in daily.index or pd.isna(daily.loc[day, "Close"]):
         return None
     return float(daily.loc[day, "Close"])
+
+
+def _bar_on(ticker: str, d: str, cache: dict[str, pd.DataFrame]) -> pd.Series | None:
+    """The day's daily bar once it is good (see _close_on)."""
+    if _close_on(ticker, d, cache) is None:
+        return None
+    return cache[ticker].loc[pd.Timestamp(d).date()]
+
+
+def _score_reach(levels: dict[str, float], high: float, low: float) -> dict[str, bool]:
+    return {k: bool(high >= v if k.startswith("up") else low <= v) for k, v in levels.items()}
 
 
 def _heal(state: dict[str, Any]) -> None:
@@ -363,7 +378,8 @@ def make_call(state: dict[str, Any]) -> list[str]:
         lines.append(f"**Market {'▲ up' if v['direction'] == 'up' else '▼ down'} "
                      f"{max(v['p_up'], 1 - v['p_up']):.0%}** · {daycall.describe(v)}")
         side = "call" if v["direction"] == "up" else "put"
-        for var in (x for x in VARIANTS if x.get("strategy") == "daycall" and not x.get("skip_quiet")):
+        for var in (x for x in VARIANTS if x.get("strategy") == "daycall" and not x.get("skip_quiet")
+                    and x.get("target")):
             name = var["ticker"]
             k = daycall.estimate_strike(c[name], name, var["cap"])
             away = abs(k / c[name]["open"] - 1) if k else None
@@ -401,6 +417,7 @@ def _post_discord(title: str, text: str) -> None:
 
 def enter_calls(state: dict[str, Any]) -> list[str]:
     """From the 9:45 scan: buy the confident calls' contracts at the real ask (about 9:30 prices)."""
+    from . import daycall
     today = datetime.now(data.NEW_YORK).date().isoformat()
     day = state.get("calls", {}).get(today)
     if not day or day.get("entered"):
@@ -423,7 +440,14 @@ def enter_calls(state: dict[str, Any]) -> list[str]:
         if side.empty:
             continue
         pick = side.iloc[(side["strike"] - ref).abs().argsort()].iloc[0]
-        notes.append(_buy(state, v, pick, ref, f"day call {c['p_up']:.0%} up"))
+        reach = (c.get("reach") or {}).get("up" if call_ else "down")
+        if _beyond_reach(pick, ref, reach):
+            notes.append(f"{v['name']}: skipped, the {pick['strike']:g} strike is {abs(pick['strike'] / ref - 1):.2%} away, "
+                         f"beyond the projected reach ({reach:.2%})")
+            continue
+        likely = daycall.REACH_LIKELY * reach if reach else None
+        extra = {"target_level": ref * (1 + likely if call_ else 1 - likely)} if v.get("exit") == "reach" and likely else {}
+        notes.append(_buy(state, v, pick, ref, f"day call {c['p_up']:.0%} up", **extra))
     day["entered"] = True
     if notes:
         _post_discord("🎯 Day-call trades (paper)", "\n".join(f"• {n}" for n in notes))
@@ -479,6 +503,13 @@ def make_update(state: dict[str, Any]) -> list[str]:
                                                   else fh["h1_loc"] <= TREND_EDGE)
     gamma = _spy_short_gamma()
     lines = [head, daycall.describe_update(u)]
+    morning = day.get("SPY") or {}
+    if morning.get("reach"):
+        lv = daycall.reach_levels(morning, u["price"], after=True)
+        u["reach"] = lv
+        lines.append(f"Projected afternoon reach from {u['price']:.2f}: likely {lv['up_likely']:.2f} up / "
+                     f"{lv['down_likely']:.2f} down (each about 2 days in 3), stretch {lv['up_stretch']:.2f} / "
+                     f"{lv['down_stretch']:.2f} (about half the time)")
     if trend:
         lines.append(f"Trend-day setup: a strong first hour closing near its {'high' if fh['h1_ret'] > 0 else 'low'}; "
                      + ("dealers are short gamma, so hedging should chase it" if gamma else
@@ -492,6 +523,20 @@ def make_update(state: dict[str, Any]) -> list[str]:
     lines.append("Paper-tested in the 0DTE lab; research, not advice.")
     _post_discord("⏱ 10:30 update", "\n".join(lines))
     return [f"10:30 update: {u['p_up']:.0%} up from {u['price']:.2f}"]
+
+
+def _beyond_reach(pick: pd.Series, ref: float, reach: float | None) -> bool:
+    """True when the strike is further away than the projected reach in its direction (a 0DTE contract
+    settles worthless unless the market gets past its strike; see daycall.REACH_LIKELY)."""
+    return reach is not None and abs(float(pick["strike"]) / ref - 1) > reach
+
+
+def _morning_reach(state: dict[str, Any], up: bool, after: bool = False) -> float | None:
+    """Today's projected stretch reach in one direction, as a fraction (after 10:30: from the 10:30 price)."""
+    from . import daycall
+    c = (state.get("calls", {}).get(datetime.now(data.NEW_YORK).date().isoformat()) or {}).get("SPY") or {}
+    r = (c.get("reach") or {}).get("up" if up else "down")
+    return None if r is None else r * (daycall.AFTER_STRETCH if after else 1.0)
 
 
 def _nearest_otm(ticker: str, up: bool, cap: float) -> tuple[pd.Series, float] | None:
@@ -526,6 +571,9 @@ def enter_profile(state: dict[str, Any]) -> list[str]:
         pick, ref = got
         # The level is set on SPY; scale it to the index for SPX.
         level = ref * s["target"] / pr["price"] if s.get("target") else None
+        if _beyond_reach(pick, ref, _morning_reach(state, up, after=True)):
+            notes.append(f"{v['name']}: skipped, the {pick['strike']:g} strike is beyond the afternoon's projected reach")
+            continue
         notes.append(_buy(state, v, pick, ref, f"{s['name']}: {s['why']}", target_level=level))
     if notes:
         _post_discord(f"📊 Market profile trade (paper): {s['name']}", "\n".join(notes))
@@ -553,6 +601,9 @@ def enter_trend(state: dict[str, Any]) -> list[str]:
         if not got:
             continue
         pick, ref = got
+        if _beyond_reach(pick, ref, _morning_reach(state, up, after=True)):
+            notes.append(f"{v['name']}: skipped, the {pick['strike']:g} strike is beyond the afternoon's projected reach")
+            continue
         notes.append(_buy(state, v, pick, ref,
                           f"trend day: first hour {fh['h1_ret']:+.2%}, gamma {'short' if gamma else 'not short'}"))
     if notes:
@@ -617,7 +668,8 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
     """How the day calls have done: all calls, confident calls, and the dashboard's SPY read."""
     out = {"days": 0, "right": 0, "confident": 0, "confident_right": 0, "dashboard": 0, "dashboard_right": 0,
            "update": 0, "update_right": 0, "update_confident": 0, "update_confident_right": 0,
-           "up_calls": 0, "up_right": 0, "down_calls": 0, "down_right": 0, "range": {}, "profile": {}}
+           "up_calls": 0, "up_right": 0, "down_calls": 0, "down_right": 0, "range": {}, "profile": {},
+           "reach": {}, "reach_after": {}, "called_side": [0, 0]}
     for day in state.get("calls", {}).values():
         for name in ("SPY",):  # the call is measured on SPY's real open (the index's open is stale)
             c = day.get(name) or {}
@@ -636,6 +688,15 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
                 b = out["range"].setdefault(c["range"], {"days": 0, "move": 0.0})
                 b["days"] += 1
                 b["move"] += abs(c["close"] / c["open"] - 1)
+        for key, src in (("reach", day.get("SPY") or {}), ("reach_after", day.get("update") or {})):
+            for k, hit in (src.get("reach_hit") or {}).items():
+                b = out[key].setdefault(k, [0, 0])
+                b[0] += hit
+                b[1] += 1
+        m = day.get("SPY") or {}
+        if m.get("confident") and m.get("reach_hit"):  # did the call's own side reach its likely level?
+            out["called_side"][0] += m["reach_hit"]["up_likely" if m["direction"] == "up" else "down_likely"]
+            out["called_side"][1] += 1
         s = (day.get("profile") or {}).get("setup") or {}
         if "outcome" in s:
             b = out["profile"].setdefault(s["name"], {"days": 0, "right": 0, "targets": 0, "reached": 0})
@@ -657,6 +718,26 @@ def calls_scorecard(state: dict[str, Any]) -> dict[str, Any]:
             out["dashboard"] += 1
             out["dashboard_right"] += (d["bias"] == "bullish") == (day["SPY"]["outcome"] == "up")
     return out
+
+
+def backfill_reach(state: dict[str, Any], days: int = 10) -> None:
+    """Add the reach projection to recent calls made before it existed (Nov 4, 2026), replayed from data
+    before each day only, so the projection record covers the whole lab. Runs outside market hours."""
+    from datetime import date
+    from . import daycall
+    for d, day in sorted(state.get("calls", {}).items())[-days:]:
+        c = day.get("SPY")
+        if c and "reach" not in c and c.get("open"):
+            try:
+                c["reach"] = daycall.call(asof=date.fromisoformat(d))["SPY"]["reach"]
+                c["reach_replayed"] = True
+            except Exception:
+                continue
+            if day.get("SPX"):
+                day["SPX"]["reach"] = c["reach"]
+            u = day.get("update") or {}
+            if u.get("price") and "reach" not in u:
+                u["reach"] = daycall.reach_levels(c, u["price"], after=True)
 
 
 def score_calls(state: dict[str, Any]) -> None:
@@ -702,6 +783,21 @@ def score_calls(state: dict[str, Any]) -> None:
             c = day.get(name)
             if c and "outcome" not in c and (close := _close_on(name, d, closes)) is not None:
                 c.update(close=close, outcome="up" if close > c["open"] else "down")
+        c = day.get("SPY") or {}
+        if c.get("reach") and "reach_hit" not in c and (bar := _bar_on("SPY", d, closes)) is not None:
+            from . import daycall
+            c["reach_hit"] = _score_reach(daycall.reach_levels(c, c["open"]), float(bar["High"]), float(bar["Low"]))
+            c["range_actual"] = float(bar["High"] - bar["Low"]) / c["open"]
+        if u and u.get("reach") and "reach_hit" not in u:
+            try:
+                m5 = data.call(yf.Ticker("SPY").history, period="5d", interval="5m")
+                m5.index = m5.index.tz_convert("America/New_York")
+                rest = m5[(m5.index.date == pd.Timestamp(d).date()) & (m5.index.hour * 60 + m5.index.minute >= 630)
+                          & (m5.index.hour < 16)]
+                if len(rest):
+                    u["reach_hit"] = _score_reach(u["reach"], float(rest["High"].max()), float(rest["Low"].min()))
+            except Exception:
+                pass
 
 
 def manage(state: dict[str, Any]) -> list[str]:
@@ -1045,6 +1141,8 @@ def run() -> list[str]:
         if ENTRY_FROM <= now.time() < ENTRY_UNTIL:
             notes += enter(state)
     notes += manage(state)
+    if not data.market_open():
+        backfill_reach(state)
     score_calls(state)
     notes += review(state)
     _save(state)

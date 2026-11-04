@@ -1554,6 +1554,58 @@ def _planned(t: dict[str, Any]) -> bool:
     return any(t.get(k) for k in ("sell_at", "sell_level", "stop_level"))
 
 
+def _projections(state: dict[str, Any]) -> str:
+    """Today's (or the latest) direction and reach projections, and how often each kind has come true."""
+    from . import daycall, zerodte
+    calls = state.get("calls", {})
+    if not calls:
+        return ""
+    d = max(calls)
+    day = calls[d]
+    c, u = day.get("SPY") or {}, day.get("update") or {}
+    rows = []
+    if c.get("p_up") is not None:
+        lean = f'{"▲ up" if c["direction"] == "up" else "▼ down"} {max(c["p_up"], 1 - c["p_up"]):.0%}'
+        rows.append(("Direction at the open", lean + ("" if c["confident"] else " (not confident: no claim)")
+                     + (f' → closed {c["outcome"]}' if c.get("outcome") else "")))
+    hit = c.get("reach_hit") or {}
+    lv = daycall.reach_levels(c, c["open"]) if c.get("open") else {}
+
+    def lvl(levels: dict[str, float], k: str, hits: dict[str, bool]) -> str:
+        mark = "" if k not in hits else (" ✅" if hits[k] else " ❌")
+        return f"{levels[k]:,.2f}{mark}"
+    if lv:
+        rows.append((f'Reach from the open ({c["open"]:,.2f})', f'likely {lvl(lv, "up_likely", hit)} up, {lvl(lv, "down_likely", hit)} '
+                     f'down; stretch {lvl(lv, "up_stretch", hit)} / {lvl(lv, "down_stretch", hit)}'))
+    if u.get("p_up") is not None:
+        rows.append(("10:30 update", f'{"▲ up" if u["direction"] == "up" else "▼ down"} {max(u["p_up"], 1 - u["p_up"]):.0%} '
+                     f'from {u["price"]:.2f}' + ("" if u["confident"] else " (not confident)")))
+    if u.get("reach"):
+        h2 = u.get("reach_hit") or {}
+        rows.append(("Afternoon reach", f'likely {lvl(u["reach"], "up_likely", h2)} up, {lvl(u["reach"], "down_likely", h2)} '
+                     f'down; stretch {lvl(u["reach"], "up_stretch", h2)} / {lvl(u["reach"], "down_stretch", h2)}'))
+    sc = zerodte.calls_scorecard(state)
+    record = []
+    if sc["days"]:
+        record.append(f'Direction at the open: confident calls right {sc["confident_right"]} of {sc["confident"]}')
+    if sc["update_confident"]:
+        record.append(f'10:30 update: confident calls right {sc["update_confident_right"]} of {sc["update_confident"]}')
+    names = {"up_likely": "likely up", "down_likely": "likely down", "up_stretch": "stretch up", "down_stretch": "stretch down"}
+    for key, label, aim in (("reach", "Reach from the open", "about 2 in 3 for likely, half for stretch"),
+                            ("reach_after", "Afternoon reach", "the same aims")):
+        if sc[key]:
+            record.append(f"{label}: " + ", ".join(f"{names[k]} {v[0]} of {v[1]}" for k, v in sc[key].items()) + f" (aim: {aim})")
+    if sc["called_side"][1]:
+        record.append(f'Confident calls whose own side reached its likely level: {sc["called_side"][0]} of {sc["called_side"][1]}')
+    facts = "".join(f"<div><span>{escape(k)}</span><b>{escape(v)}</b></div>" for k, v in rows)
+    return (f'<h2>Projections: {_day(d)}</h2><div class="panel"><div class="facts">{facts}</div>'
+            '<p class="small muted">Likely levels are reached about two days in three and stretch levels about half the '
+            'time, each way, in a 2016-2026 walk-forward test. Direction is the hard part: confident calls were right '
+            'about 56% of the time against 54% for always saying up. Strikes beyond the projected reach are not bought.</p>'
+            + (f'<h4>Record so far</h4><ul>{"".join(f"<li>{escape(x)}</li>" for x in record)}</ul>' if record else "")
+            + "</div>")
+
+
 def render_zerodte() -> str:
     """The 0DTE lab's page: open contracts, portfolios, the latest review and the trades."""
     from . import zerodte
@@ -1629,6 +1681,7 @@ def render_zerodte() -> str:
                 + f'</div><p class="small muted">{escape(zerodte.plan_text(t))}. '
                   f'{escape("; ".join(names[x["variant"]] for x in group))}</p></div>')
 
+    proj_html = _projections(state)
     live_html = ('<h2>Open trades</h2><div class="panel">'
                  '<p class="small muted">Updated every scan, about every 15 minutes, from quotes 15 minutes delayed. The time '
                  'shown is the market moment each bid reflects. Profit is what selling at that bid would make, after fees.</p>'
@@ -1645,9 +1698,10 @@ def render_zerodte() -> str:
         'is what these records are for.</p>'
         f'<p class="small">Each variant is its own paper portfolio of {_money(start, False)}, one contract a trade, skipped '
         'when the portfolio can\'t pay for it. Day-call contracts are sold at 10:30 when the first hour runs 0.25% or '
-        'more against the call. Every finished day gets a review: what the market did against the forecasts, why each '
+        'more against the call. No contract is bought whose strike lies beyond the projected reach (see Projections). '
+        'Every finished day gets a review: what the market did against the forecasts, why each '
         'trade won or lost, and the lessons.</p>'
-        f'{live_html}<h2>Portfolios</h2><div class="panel">{"".join(groups)}</div>{review_html}<h2>Latest trades</h2>'
+        f'{proj_html}{live_html}<h2>Portfolios</h2><div class="panel">{"".join(groups)}</div>{review_html}<h2>Latest trades</h2>'
         + (f'<div class="panel scroll"><table><thead><tr><th>Date</th><th>Variant</th><th>Contract</th><th>Paid</th>'
            f'<th>Sell plan</th><th>Exit</th><th>P/L</th></tr></thead><tbody>{recent}</tbody></table></div>' if recent else
            '<p class="muted small">No trades yet: the rule fires on roughly one day in four.</p>'))

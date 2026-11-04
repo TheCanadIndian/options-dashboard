@@ -155,6 +155,39 @@ def _range(train: pd.DataFrame, today_row: pd.DataFrame, cols: list[str]) -> tup
     return today, ("quiet" if today <= quiet else "wide" if today >= wide else "normal")
 
 
+# How far SPY reaches from its open each way (high / open - 1, 1 - low / open), from the same signals
+# plus the last 20 days' median reaches; gradient-boosted median regression on the log. Walk-forward
+# 2016-2026 (yearly refits, five-year window, 2,726 days): the median projection tracked the actual
+# reach (correlation 0.43 up, 0.32 down, against 0.31 and 0.28 for the 20-day median alone), and the
+# projected range sorted days well (the quietest third ranged 0.62% on average, the widest 1.77%).
+# "Likely" is 0.6x the median: touched about two days in three (57-75% in every year). "Stretch" is
+# the median itself: touched about half the time. After 10:30 the rest of the day reaches about 0.4x
+# the morning median two days in three, and 0.73x half the time (2024-26 hourly bars); the morning
+# projection predicts the afternoon's travel better than the first hour's width (0.65 against 0.27).
+REACH_LIKELY, AFTER_LIKELY, AFTER_STRETCH = 0.6, 0.4, 0.73
+
+
+def _reach(train: pd.DataFrame, today_row: pd.DataFrame, cols: list[str]) -> dict[str, float]:
+    from sklearn.ensemble import HistGradientBoostingRegressor
+    out = {}
+    for side in ("up", "down"):
+        x = cols + [f"{side}20"]
+        m = HistGradientBoostingRegressor(loss="quantile", quantile=0.5, max_depth=3, learning_rate=0.03, max_iter=300,
+                                          min_samples_leaf=80, random_state=0).fit(train[x], np.log(train[f"{side}_r"] + 1e-4))
+        out[side] = float(np.exp(m.predict(today_row[x])[0]))
+    return out
+
+
+def reach_levels(c: dict[str, Any], base: float, after: bool = False) -> dict[str, float]:
+    """Likely and stretch levels each way from `base` (the open, or the 10:30 price with after=True)."""
+    r = c.get("reach") or {}
+    if not r:
+        return {}
+    likely, stretch = (AFTER_LIKELY, AFTER_STRETCH) if after else (REACH_LIKELY, 1.0)
+    return {"up_likely": base * (1 + likely * r["up"]), "up_stretch": base * (1 + stretch * r["up"]),
+            "down_likely": base * (1 - likely * r["down"]), "down_stretch": base * (1 - stretch * r["down"])}
+
+
 def _opens_today() -> dict[str, float]:
     out = {}
     for sym in OPEN_NOW:
@@ -188,14 +221,18 @@ def call(asof: date | None = None) -> dict[str, Any]:
     f = f.join(reg_hist)
     f.loc[today, reg_today.index] = reg_today.to_numpy()
     cols = [c for c in f.columns if c not in ("y", "move")]
+    s = px["SPY"]
+    f["up_r"], f["down_r"] = s["High"] / s["Open"] - 1, 1 - s["Low"] / s["Open"]
+    f["up20"], f["down20"] = (f["up_r"].rolling(20).median().shift(1), f["down_r"].rolling(20).median().shift(1))
     start = today - pd.DateOffset(years=WINDOW_YEARS)
-    history = f[(f.index < today)].dropna(subset=cols + ["y", "move"])
-    today_row = f.loc[[today], cols]
+    history = f[(f.index < today)].dropna(subset=cols + ["y", "move", "up_r", "down_r", "up20", "down20"])
+    today_row = f.loc[[today], cols + ["up20", "down20"]]
     if today_row.isna().any(axis=None):
-        today_row = today_row.fillna(history[cols].iloc[-1])
+        today_row = today_row.fillna(history[cols + ["up20", "down20"]].iloc[-1])
     predict, lin, sc = _fit(history[history.index >= start], cols)
-    p = float(predict(today_row)[0])
-    expected, label = _range(history[history.index >= start], today_row, cols)
+    p = float(predict(today_row[cols])[0])
+    expected, label = _range(history[history.index >= start], today_row[cols], cols)
+    reach = _reach(history[history.index >= start], today_row, cols)
 
     # The model's own recent record: trained on the five years before the last 12 months, judged on them.
     cut = today - pd.DateOffset(months=12)
@@ -216,7 +253,7 @@ def call(asof: date | None = None) -> dict[str, Any]:
     drivers = sorted(contrib, key=lambda t: -abs(t[1]))[:3]
     base = {"p_up": p, "direction": "up" if p >= 0.5 else "down", "confident": abs(p - 0.5) >= CONFIDENT,
             "drivers": drivers, "trained_days": len(history), "record": record, "vix1d": opens.get("^VIX1D"),
-            "expected_move": expected, "range": label}
+            "expected_move": expected, "range": label, "reach": reach}
     return {"SPY": {**base, "open": opens["SPY"]}, "SPX": {**base, "open": opens["^GSPC"]}}
 
 
@@ -241,11 +278,15 @@ DRIVER_TEXT = {"gap": "the overnight gap", "gap_atr": "the gap's size", "prev_re
 def describe(c: dict[str, Any]) -> str:
     lean = ", ".join(f"{DRIVER_TEXT.get(f, f)} ({'up' if v > 0 else 'down'})" for f, v in c["drivers"] if abs(v) > 0.02)
     rec = c.get("record") or {}
-    track = (f". Its confident calls over the last 12 months were right {rec['right']:.0%} of the time "
-             f"({rec['days']} days)" if rec.get("right") is not None else "")
-    size = (f" Expected move {c['expected_move']:.2%} ({c['range']} day)" if c.get("expected_move") else "")
+    track = (f" Its confident calls over the last 12 months were right {rec['right']:.0%} of the time "
+             f"({rec['days']} days)." if rec.get("right") is not None else "")
+    size =(f" Expected move {c['expected_move']:.2%} ({c['range']} day)." if c.get("expected_move") else "")
+    lv = reach_levels(c, c["open"]) if c.get("open") else {}
+    reach = (f" Projected reach from the open {c['open']:,.2f}: likely up to {lv['up_likely']:,.2f} and down to "
+             f"{lv['down_likely']:,.2f} (each about 2 days in 3), stretch {lv['up_stretch']:,.2f} / {lv['down_stretch']:,.2f} "
+             f"(about half the time)." if lv else "")
     return (f"{c['p_up']:.0%} chance SPY closes above its open" + (f"; leaning on {lean}" if lean else "") + "." + size
-            + track)
+            + reach + track)
 
 
 def estimate_strike(c: dict[str, Any], ticker: str, cap: float) -> float | None:

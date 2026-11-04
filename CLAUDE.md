@@ -95,6 +95,15 @@ the user's real money.
   reached on only 13% of confident days (0.4%: 57%), hence the near-the-money SPY $150 variants. The size
   forecast runs low (actual moves a median 1.15x it). Yahoo's daily bar can be blank right after the close:
   `_close_on` waits for a good one and `_heal` redoes anything settled on a blank.
+  Reach (Nov 2026; the user's main goal is projecting direction and size right more often than not, without
+  changing position size): `daycall._reach` projects how far SPY reaches above and below the open (median
+  regression). "Likely" levels (0.6x) were touched about 2 days in 3 every year 2016-26, "stretch" (1x) about
+  half; after 10:30, 0.4x and 0.73x of the morning reach from the 10:30 price. Size is predictable, direction
+  barely (confident calls 55.7% vs 53.9% for always up; nothing tried at 10:30 beat ~55%, and buying a pullback
+  to the other side's level had no edge). So no contract is bought whose strike is beyond the projected reach
+  (it would have skipped every SPX $150 day call), `day_spy150_reach` exits at the likely level, and every
+  projection is scored daily (`reach_hit`, `calls_scorecard`, the Projections panel). `backfill_reach` replays
+  the projection for recent calls made before it existed.
 
 ## Code map (`src/options_dashboard/`)
 
