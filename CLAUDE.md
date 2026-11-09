@@ -121,9 +121,17 @@ the user's real money.
 | `journal.py`, `learning.py`, `scorecard.py` | Follow every flagged contract 15 trading days, grade at 5/10/15, weekly weight tuning |
 | `earnings.py` | Earnings outlook and plays |
 | `longterm.py` | Invest page research: S&P 500 scores, buy areas, targets, cash machines, themes |
+| `relstrength.py` | IBD-style RS rating (1-99) for the S&P 500, built by the research run: the Scanner's RS ratings sub-tab (`rs.html`) and the RS column on the Invest shortlist |
 | `site.py` | Every page of the static site, the terminal styling, publishing |
 | `cloudstate.py` | State to and from the Worker |
 | `app.py` (repo root) | Local Streamlit dashboard (`start.bat` pulls the cloud state first) |
+
+RS ratings (Nov 2026, from a weekly 2008-26 test of today's S&P 500; details in `relstrength.py`'s docstring):
+useless for 1-3 week swings; over 3 months most of the edge is volatility, and what is left is the "momentum
+list" (rated 80+ and in the most volatile third, in rising markets). No downside rule held (the weakest bounce
+after sell-offs), so the page shows the weakest as context and never as put candidates. Not a scoring weight
+anywhere. Markov chains, Fibonacci, pitchforks, Bollinger bands and VWAP/EMA stacking were also tested for
+direction and rejected (stacking at 10:30 is real but too small to pay for a 0DTE call).
 
 Hand-written research lives in `research/`: `themes.json` (themes traced to second- and
 third-order beneficiaries) and earnings notes. Both are dated snapshots; refresh them when

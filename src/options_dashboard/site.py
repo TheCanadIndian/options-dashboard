@@ -586,12 +586,22 @@ draw()});draw()});
 
 
 STRATEGY_TABS = (("Strategy race", "strategies.html"), ("0DTE lab", "zerodte.html"))
+SCANNER_TABS = (("Contracts", "scanner.html"), ("RS ratings", "rs.html"))
+SUBPAGES = {"zerodte.html": "Strategies", "rs.html": "Scanner"}  # sub-tab pages and the main tab they sit under
+
+
+def _subtabs(tabs: tuple, active: str, label: str) -> str:
+    return f'<div class="subtabs" aria-label="{label}">' + "".join(
+        f'<a href="{href}"{" aria-current=\"page\"" if href == active else ""}>{name}</a>'
+        for name, href in tabs) + "</div>"
 
 
 def _strategy_tabs(active: str) -> str:
-    return '<div class="subtabs" aria-label="Strategy pages">' + "".join(
-        f'<a href="{href}"{" aria-current=\"page\"" if href == active else ""}>{name}</a>'
-        for name, href in STRATEGY_TABS) + "</div>"
+    return _subtabs(STRATEGY_TABS, active, "Strategy pages")
+
+
+def _scanner_tabs(active: str) -> str:
+    return _subtabs(SCANNER_TABS, active, "Scanner pages")
 
 
 def _nav(active: str) -> str:
@@ -607,7 +617,7 @@ def refresh_nav() -> None:
     import re
     for page in OUT.parent.glob("*.html"):
         html = page.read_text(encoding="utf-8")
-        current = "Strategies" if page.name == "zerodte.html" else next(
+        current = SUBPAGES.get(page.name) or next(
             (name for name, _, href in NAV if href == page.name), None)
         if current is None:
             continue
@@ -998,7 +1008,7 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
     errors = (
         '<p class="notice">Could not scan: ' + escape(", ".join(result["errors"])) + "</p>" if result["errors"] else ""
     )
-    body = f"""<div class="tiles">{tile_html}</div>{errors}
+    body = f"""{_scanner_tabs("scanner.html")}<div class="tiles">{tile_html}</div>{errors}
 <h2>All flagged contracts</h2>{table}
 <h2>Market read by ticker</h2>
 <div class="panel scroll"><table class="sortable"><thead><tr>{"".join(f"<th>{h}</th>" for h in read_heads)}</tr></thead>
@@ -1785,7 +1795,9 @@ def build(state: dict[str, Any], cfg: dict[str, Any], result: dict[str, Any] | N
         OUT.with_name("scanner.html").write_text(render_scanner(result, state, cfg), encoding="utf-8")
         OUT.with_name("earnings.html").write_text(render_earnings(result, cfg), encoding="utf-8")
     OUT.with_name("learning.html").write_text(render_learning(scorecard.load(), cfg), encoding="utf-8")
-    OUT.with_name("invest.html").write_text(render_invest(longterm.load()), encoding="utf-8")
+    research = longterm.load()
+    OUT.with_name("invest.html").write_text(render_invest(research), encoding="utf-8")
+    OUT.with_name("rs.html").write_text(render_rs(research), encoding="utf-8")
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -1913,7 +1925,9 @@ def _research_card(r: dict[str, Any]) -> str:
         f'base {_upside(r["base"], price)}</span></summary>'
         f'<div class="tags">{styles}<span class="tag">Quality {r["quality"]:.0f}</span><span class="tag">Growth {r["growth"]:.0f}</span>'
         + (f'<span class="tag">Dividend {r["dividend"]:.0f}</span>' if r.get("dividend") is not None else "")
-        + f'<span class="tag">Value {r["value"]:.0f}</span></div>'
+        + f'<span class="tag">Value {r["value"]:.0f}</span>'
+        + (f'<span class="tag">RS {r["rs"]["rating"]}{" ▲ momentum list" if r["rs"]["upside"] else ""}</span>' if r.get("rs") else "")
+        + '</div>'
         f'<h4>The business</h4><p class="small">{escape(r.get("summary") or "")}</p>{notes}'
         f'<h4>Why it made the list</h4><ul>{"".join(f"<li>{escape(x)}</li>" for x in _why_listed(r))}</ul>'
         f'<h4>Buy area: {_money(a["low"])} to {_money(a["high"])} ({escape(a["high_name"])} down to {escape(a["low_name"])})</h4>'
@@ -1922,6 +1936,105 @@ def _research_card(r: dict[str, Any]) -> str:
         f'<h4>Targets</h4><ul>{target_math}{analysts}</ul>'
         f'<h4>What would make it a sell</h4><ul>{"".join(f"<li>{escape(x)}</li>" for x in sell)}</ul>'
         f'<p class="muted small">Fundamentals from the {escape(r.get("fundamentals_date") or "")} refresh.</p></details>')
+
+
+def _rs_cell(rs: dict[str, Any] | None) -> str:
+    if not rs:
+        return _cell(-1, "–")
+    cls = "up" if rs["rating"] >= 80 else "down" if rs["rating"] < 20 else ""
+    return _cell(rs["rating"], f'<span class="{cls}">{rs["rating"]}</span>{" ▲" if rs.get("upside") else ""}')
+
+
+RS_JS = """
+(function(){var q=document.getElementById('rs-q'),s=document.getElementById('rs-sector'),v=document.getElementById('rs-vol'),
+u=document.getElementById('rs-up'),n=document.getElementById('rs-count'),rows=document.querySelectorAll('#rs-all tbody tr');
+if(!q)return;function f(){var t=q.value.trim().toUpperCase(),k=0;rows.forEach(function(r){
+var ok=(!t||r.dataset.t.indexOf(t)===0||r.dataset.n.indexOf(t)>=0)&&(!s.value||r.dataset.s===s.value)
+&&(!v.value||r.dataset.v===v.value)&&(!u.checked||r.dataset.u==='1');r.style.display=ok?'':'none';if(ok)k++});
+n.textContent=k+' of '+rows.length+' shown'}[q,s,v,u].forEach(function(e){e.addEventListener('input',f);e.addEventListener('change',f)});f()})();
+"""
+
+
+def _rs_rows(rows: list[dict[str, Any]], upside: set[str]) -> str:
+    out = []
+    for r in rows:
+        cls = "up" if r["rating"] >= 80 else "down" if r["rating"] < 20 else ""
+        ch = r.get("change")
+        trend = ("above both" if r["above_10w"] and r["above_40w"] else "below both" if not (r["above_10w"] or r["above_40w"])
+                 else "above 10-wk" if r["above_10w"] else "above 40-wk")
+        out.append(
+            f'<tr data-t="{escape(r["ticker"])}" data-n="{escape(r["name"].upper())}" data-s="{escape(r["sector"])}" '
+            f'data-v="{escape(r["volatility"] or "")}" data-u="{int(r["ticker"] in upside)}">'
+            + _cell(r["rating"], f'<b class="{cls}">{r["rating"]}</b>{" ▲" if r["ticker"] in upside else ""}')
+            + _cell(r["ticker"], f'<b>{escape(r["ticker"])}</b>', False)
+            + _cell(r["name"], escape(r["name"]), False)
+            + _cell(r["sector"], escape(r["sector"]), False)
+            + _cell(ch if ch is not None else 0, "–" if ch is None else f"{ch:+d}")
+            + _cell(r["vs_spy_3m"] if r["vs_spy_3m"] is not None else 0, _rel(r["vs_spy_3m"]))
+            + _cell(r["vs_spy_12m"] if r["vs_spy_12m"] is not None else 0, _rel(r["vs_spy_12m"]))
+            + _cell({"Calm": 0, "Middle": 1, "Wild": 2}.get(r["volatility"], -1), escape(r["volatility"] or "–"), False)
+            + _cell(r["from_high"], f"{r['from_high']:.0%}")
+            + _cell(trend, trend, False)
+            + _cell(r["price"], _money(r["price"])) + "</tr>")
+    return "".join(out)
+
+
+RS_HEADS = ("<tr><th>RS</th><th>Ticker</th><th>Company</th><th>Sector</th><th>RS change, 4 wks</th><th>vs SPY, 3 mo</th>"
+            "<th>vs SPY, 1 yr</th><th>Volatility</th><th>From 52-wk high</th><th>Price vs 10/40-wk average</th><th>Price</th></tr>")
+
+
+def render_rs(res: dict[str, Any]) -> str:
+    rs = (res or {}).get("rs") or {}
+    tabs = _scanner_tabs("rs.html")
+    if not rs.get("rows"):
+        body = tabs + ('<p class="muted">The ratings are built by the research run after each weekday&#39;s close; '
+                       'they appear here after the next one.</p>')
+        return _page("Scanner", "Relative strength ratings for the S&P 500.", body, TABLE_JS, heading="RS Ratings")
+    rows, ev = rs["rows"], rs["evidence"]
+    by = {r["ticker"]: r for r in rows}
+    upside = set(rs["upside"])
+    rising = rs.get("rising")
+    spy6 = rs.get("spy_6m")
+    regime = ("unknown" if rising is None else
+              f'rising (SPY {spy6:+.1%} over 6 months): the conditions the momentum list was tested in' if rising else
+              f'falling (SPY {spy6:+.1%} over 6 months): momentum tends to stumble after sell-offs, so lean on the list less')
+    tiles = [("Stocks rated", str(len(rows)), "S&P 500 members with a year of prices"),
+             ("Momentum list", str(len(upside)), "rated 80+ and among the most volatile third"),
+             ("Market", "Rising" if rising else "Falling" if rising is False else "–", "SPY over the last 6 months"),
+             ("Rated 80+", str(sum(r["rating"] >= 80 for r in rows)), "top fifth by definition")]
+    tile_html = "".join(f'<div class="tile"><div class="k">{k}</div><div class="v">{v}</div><div class="d">{d}</div></div>'
+                        for k, v, d in tiles)
+    up_rows = [by[t] for t in rs["upside"]]
+    weak_rows = [by[t] for t in rs["weakest"]][:25]
+    sectors = sorted({r["sector"] for r in rows if r["sector"]})
+    table = lambda rr, ident="": (f'<div class="panel scroll"><table class="sortable"{ident}><thead>{RS_HEADS}</thead>'
+                                  f'<tbody>{_rs_rows(rr, upside)}</tbody></table></div>')
+    filters = ('<div class="filters"><label>Search <input id="rs-q" type="search" placeholder="Ticker or name" size="12"></label>'
+               '<label>Sector <select id="rs-sector"><option value="">All</option>'
+               + "".join(f"<option>{escape(s)}</option>" for s in sectors) + '</select></label>'
+               '<label>Volatility <select id="rs-vol"><option value="">All</option><option>Wild</option><option>Middle</option>'
+               '<option>Calm</option></select></label><label><input type="checkbox" id="rs-up"> Momentum list only</label>'
+               '<span class="muted small" id="rs-count"></span></div>')
+    body = f"""{tabs}<div class="tiles">{tile_html}</div>
+<p class="notice">Research, not advice. The market is {regime}.</p>
+<h2>Promising for upside: the momentum list</h2>
+<p class="small">{escape(ev["upside"])} {escape(ev["calm"])}</p>
+{table(up_rows) if up_rows else '<p class="muted">No stock is rated 80+ and in the most volatile third right now.</p>'}
+<p class="muted small">{escape(ev["falling"])} Volatile means bigger swings both ways: these can drop hard too.</p>
+<h2>Downside: the weakest (not a put list)</h2>
+<p class="small">{escape(ev["downside"])}</p>
+{table(weak_rows) if weak_rows else '<p class="muted">No stock is rated under 20 and below both averages right now.</p>'}
+<p class="muted small">Rated under 20 and below both its 10-week and 40-week averages, lowest first (at most 25).
+Shown so you can see what is weak, not because weak stocks were found to keep falling.</p>
+<h2>All ratings</h2>{filters}{table(rows, ' id="rs-all"')}
+<h4>How it works</h4>
+<ul class="small"><li>Score = 40% of the 3-month return + 20% each of the 6-, 9- and 12-month returns (the IBD-style formula),
+ranked against every S&amp;P 500 member: 99 means it beat 98% of them. Built from weekly closes.</li>
+<li>RS change: the rating now against 4 weeks ago. Volatility: weekly price swings over 3 months, in thirds across the index.</li>
+<li>{escape(ev["swings"])}</li><li>{escape(ev["caveat"])}</li></ul>"""
+    sub = (f"How every S&amp;P 500 stock&#39;s last year ranks against the rest, and what that has (and has not) "
+           f"meant afterwards. Prices to the week of {escape(rs['as_of'])}, built {_when(rs['built'])} ET.")
+    return _page("Scanner", sub, body, TABLE_JS + RS_JS, heading="RS Ratings")
 
 
 def _rel(x: float | None) -> str:
@@ -1997,15 +2110,19 @@ def render_invest(res: dict[str, Any]) -> str:
         f'{_cell(r["quality"], f"{r["quality"]:.0f}")}{_cell(r["growth"], f"{r["growth"]:.0f}")}'
         f'{_cell(r["dividend"] if r.get("dividend") is not None else -1, f"{r["dividend"]:.0f}" if r.get("dividend") is not None else "–")}'
         f'{_cell(r["value"], f"{r["value"]:.0f}")}{_cell(r["overall"], f"<b>{r["overall"]:.0f}</b>")}'
-        f'{_cell(r["price"], _money(r["price"]))}'
+        f'{_rs_cell(r.get("rs"))}{_cell(r["price"], _money(r["price"]))}'
         f'{_cell(r["buy_area"]["low"], f"{_money(r["buy_area"]["low"])}–{_money(r["buy_area"]["high"])}")}'
         f'{_cell(r["buy_area"]["status"], _status(r["buy_area"]), False)}'
         f'{_cell(r["base"] / r["price"], _upside(r["base"], r["price"]))}{_cell(r["stretch"] / r["price"], _upside(r["stretch"], r["price"]))}'
         f'{_cell(r.get("analyst_mean") or 0, _money(r["analyst_mean"]) if r.get("analyst_mean") else "–")}</tr>'
         for r in picks)
     table = ('<div class="panel scroll"><table class="sortable"><thead><tr><th>Ticker</th><th>Company</th><th>Sector</th><th>Styles</th>'
-             '<th>Quality</th><th>Growth</th><th>Dividend</th><th>Value</th><th>Overall</th><th>Price</th><th>Buy area</th><th>Status</th>'
-             f'<th>Base (1y)</th><th>Stretch (3y)</th><th>Analysts</th></tr></thead><tbody>{rows}</tbody></table></div>')
+             '<th>Quality</th><th>Growth</th><th>Dividend</th><th>Value</th><th>Overall</th><th>RS</th><th>Price</th><th>Buy area</th><th>Status</th>'
+             f'<th>Base (1y)</th><th>Stretch (3y)</th><th>Analysts</th></tr></thead><tbody>{rows}</tbody></table></div>'
+             '<p class="muted small">RS is the relative strength rating (1-99): how the last year&#39;s price performance, weighted '
+             'toward the last 3 months, ranks against the rest of the S&amp;P 500. ▲ marks the momentum list on the '
+             '<a href="rs.html">RS ratings page</a>. It is context on timing, not part of the score: in history it helped '
+             'mainly for volatile stocks in rising markets, and it tends to reverse after sell-offs.</p>')
 
     def cm_table_for(ms: list[dict[str, Any]]) -> str:
         cm_rows = "".join(

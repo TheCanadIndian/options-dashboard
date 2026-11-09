@@ -42,7 +42,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from . import data
+from . import data, relstrength
 from .config import HOME, STATE_DIR
 
 DIR = STATE_DIR / "longterm"
@@ -673,6 +673,16 @@ def refresh() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         result["themes_meta"] = {}
     result["industries"] = emerging_industries(members, prices, spy) if spy is not None else {"gaining": [], "fading": []}
+    try:  # IBD-style relative strength for the Scanner's RS page and the shortlist's RS column
+        result["rs"] = relstrength.ratings(members, prices, spy)
+    except Exception as exc:  # never let it sink the research run
+        result["rs"] = {}
+        failed.append(f"RS ratings: {type(exc).__name__}: {exc}")
+    by_ticker = {r["ticker"]: r for r in result["rs"].get("rows", [])}
+    for r in out:
+        rs = by_ticker.get(r["ticker"])
+        r["rs"] = None if rs is None else {"rating": rs["rating"], "change": rs["change"], "volatility": rs["volatility"],
+                                           "upside": r["ticker"] in result["rs"]["upside"]}
     DIR.mkdir(parents=True, exist_ok=True)
     LATEST.write_text(json.dumps(result, default=float), encoding="utf-8")
     return result
@@ -695,6 +705,7 @@ if __name__ == "__main__":
         print(f"Screened {res['screened']} of {res['members']}; shortlisted {len(res['shortlist'])}; "
               f"{len(res.get('cash_machines', []))} cash machines; {len(res['failed'])} without enough data")
     site.OUT.with_name("invest.html").write_text(site.render_invest(load()), encoding="utf-8")
+    site.OUT.with_name("rs.html").write_text(site.render_rs(load()), encoding="utf-8")
     site.refresh_nav()
     if "--publish" in sys.argv:
         print(site.publish() or "Published")
