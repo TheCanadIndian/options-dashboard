@@ -288,6 +288,12 @@ def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str
             return f"target under {cfg['sim_min_reward_risk']:g}x the risk"
     if cfg.get("sim_min_moneyness") is not None and row["moneyness"] < cfg["sim_min_moneyness"]:
         return "not far enough out of the money"
+    if cfg.get("sim_types") and row["type"] not in cfg["sim_types"]:
+        return f"this account only buys {' and '.join(cfg['sim_types'])}s"
+    for factor, least in (cfg.get("sim_min_factors") or {}).items():
+        value = row.get(f"f_{factor}")
+        if value is None or pd.isna(value) or value < least:
+            return f"{factor} reading under {least:g}"
     if cfg.get("sim_require_short_gamma"):
         lv = info.get("levels", {})
         spot = float(row["spot"])

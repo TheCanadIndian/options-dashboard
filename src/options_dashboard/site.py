@@ -1206,6 +1206,38 @@ def _summary_rows(items: list[tuple[str, dict[str, Any]]]) -> str:
         for label, s in items)
 
 
+FILTER_MARKS = {"Ready": "✅ Ready", "Collecting": "… Collecting", "Mixed": "• Mixed", "Not working": "✗ Not working"}
+
+
+def _filter_tests(ft: dict[str, Any] | None) -> str:
+    """Candidate filters and exits on out-of-the-money contracts, against the rules in use (filters.py)."""
+    if not ft:
+        return ""
+    if ft.get("error"):
+        return f'<h2>Filter tests</h2><p class="muted">Could not run: {escape(ft["error"])}</p>'
+    b, bar = ft["baseline"], ft["bar"]
+
+    def rows(items):
+        return "".join(
+            f'<tr>{_cell(t["name"], escape(t["name"]), False)}{_cell(t["contracts"], f"{t["contracts"]:,}")}'
+            f'{_cell(t["sessions"], str(t["sessions"]))}{_cell(t["avg"] if t["avg"] is not None else -999, _dollars(t["avg"]))}'
+            f'{_cell(t["edge"] if t["edge"] is not None else -999, "–" if t["edge"] is None else _signed(t["edge"]))}'
+            f'{_cell(t["win_rate"] or 0, _pct(t["win_rate"], 0))}{_cell(t["weeks_ahead"], f"{t["weeks_ahead"]} of {t["weeks"]}")}'
+            f'{_cell(t["status"], FILTER_MARKS.get(t["status"], t["status"]), False)}</tr>' for t in items)
+    head = ('<tr><th>Test</th><th>Contracts</th><th>Sessions</th><th>Average profit</th><th>vs all flagged</th>'
+            '<th>Win rate</th><th>Weeks ahead</th><th>Status</th></tr>')
+    return (f'<h2>Filter tests</h2><p class="small">Every journaled out-of-the-money contract, replayed under each candidate '
+            f'and compared with {escape(b["name"].lower())} ({b["contracts"]:,} contracts, average {_dollars(b["avg"])}). '
+            f'A test is <b>Ready</b> to adopt with at least {bar["contracts"]} contracts over {bar["weeks"]}+ entry weeks, ahead '
+            f'in 3 of every 4 weeks including the latest, and ahead by at least {_money(bar["edge"])} a contract. Until then '
+            f'nothing changes.</p>'
+            f'<h4>Entry filters</h4><div class="panel scroll"><table class="sortable"><thead>{head}</thead><tbody>{rows(ft["filters"])}</tbody></table></div>'
+            f'<h4>Exits (stops never looser than now)</h4><div class="panel scroll"><table class="sortable"><thead>{head}</thead>'
+            f'<tbody>{rows(ft["exits"])}</tbody></table></div>'
+            '<p class="muted small">Grades are each contract&#39;s longest completed holding period. Contracts on the same stock '
+            'and day overlap, so Ready is the minimum bar, not proof.</p>')
+
+
 def render_learning(card: dict[str, Any], cfg: dict[str, Any]) -> str:
     if not card:
         body = ('<p class="muted">The journal starts filling at the next scan in market hours. The first contracts '
@@ -1271,7 +1303,8 @@ and sold at the bid at the target, the stop or the end of its holding period, le
 <h2>Profit by score</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows([(b["band"], b) for b in card["bands"]])}</tbody></table></div>
 <h2>Profit by moneyness</h2><div class="panel scroll"><table><thead>{summary_heads}</thead><tbody>{_summary_rows(sorted(card["moneyness"].items()))}</tbody></table></div>
 <h2>Exit rules</h2><div class="panel scroll"><table><thead><tr><th>Target</th><th>Stop</th><th>Trades</th><th>Average profit</th><th>Win rate</th><th></th></tr></thead><tbody>{exits}</tbody></table></div>
-<p class="muted small">{escape(f"Best so far: +{best['target']:.0%} target with a -{best['stop']:.0%} stop. " if best else "")}Exit rules are reported, not changed automatically.</p>
+<p class="muted small">{escape(f"Best so far: +{best['target']:.0%} target with a -{best['stop']:.0%} stop. " if best else "")}Exit rules are not changed automatically: they change when a test below has enough data. Stops are never loosened.</p>
+{_filter_tests(card.get("filter_tests"))}
 <h2>Earnings</h2><div class="panel"><p>Plays held through the report: {card["earnings_plays"]["trades"]} graded, average {_dollars(card["earnings_plays"]["avg"])}, win rate {_pct(card["earnings_plays"]["win_rate"], 0)}.
 Leans called the reaction's direction {_pct(earn["lean_hit_rate"], 0)} of the time ({earn["leaning"]} reports).
 Beat-probability error (Brier score, 0 is perfect, 0.25 is a coin flip): {"n/a" if earn["brier"] is None else f"{earn['brier']:.3f}"}. {earn["pending"]} predictions waiting for their report.</p>

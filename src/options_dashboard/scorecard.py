@@ -13,11 +13,11 @@ from typing import Any
 
 import numpy as np
 
-from . import data, journal, learning, structure
+from . import data, filters, journal, learning, structure
 from .config import HOME
 
 FILE = HOME / "journal" / "scorecard.json"
-TARGETS = [0.30, 0.50, 0.75, 1.00]
+TARGETS = [0.30, 0.50, 0.75, 1.00, 1.50, 2.00]
 STOPS = [0.25, 0.40, 0.50]
 BANDS = [(0, 60), (60, 70), (70, 80), (80, 101)]
 
@@ -158,6 +158,10 @@ def build(cfg: dict[str, Any], base_factors: dict[str, float], full_conviction: 
         "earnings_plays": _summary([r["pnl"] for r in earnings_rows]),
         "earnings": _earnings_results(cfg), "log": learning.log(),
     }
+    try:
+        card["filter_tests"] = filters.run(cfg)
+    except Exception as exc:  # a test that breaks must not cost the scorecard
+        card["filter_tests"] = {"error": f"{type(exc).__name__}: {exc}"}
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return card

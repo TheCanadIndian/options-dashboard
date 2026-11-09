@@ -119,12 +119,20 @@ the user's real money.
 | `vol.py`, `avwap.py`, `sectors.py`, `seasonal.py`, `regime.py` | Volatility surface, AVWAPs, rotation (sectors and Mag 7), seasonality, market regime |
 | `portfolio.py` | Simulated accounts: entry gate, structural stops, reviews, exits |
 | `journal.py`, `learning.py`, `scorecard.py` | Follow every flagged contract 15 trading days, grade at 5/10/15, weekly weight tuning |
+| `filters.py` | Filter tests on the Learning page: candidate entry filters and exits replayed on journaled OTM contracts against a fixed "enough data" bar |
 | `earnings.py` | Earnings outlook and plays |
 | `longterm.py` | Invest page research: S&P 500 scores, buy areas, targets, cash machines, themes |
 | `relstrength.py` | IBD-style RS rating (1-99) for the S&P 500, built by the research run: the Scanner's RS ratings sub-tab (`rs.html`) and the RS column on the Invest shortlist |
 | `site.py` | Every page of the static site, the terminal styling, publishing |
 | `cloudstate.py` | State to and from the Worker |
 | `app.py` (repo root) | Local Streamlit dashboard (`start.bat` pulls the cloud state first) |
+
+Changing rules (Nov 9, 2026): the user wants aggressive changes until something is profitable, out-of-the-money
+contracts kept, but a rule changes only once it has enough data. `filters.py` holds the bar (300+ contracts,
+4+ entry weeks, ahead in 3 of 4 including the latest, +$2 a contract; one-sided filters also need a rising and a
+falling SPY week). Weight tuning keeps its own lock (40 sessions, about Dec 22), which the user is fine waiting for.
+Done so far: the target went from +50% to +100% (stop unchanged at -40%); "Gamma backdrop, score 60+" and "Puts
+only, score 60+" run as strategy accounts. Never loosen a stop to chase a better test result.
 
 RS ratings (Nov 2026, from a weekly 2008-26 test of today's S&P 500; details in `relstrength.py`'s docstring):
 useless for 1-3 week swings; over 3 months most of the edge is volatility, and what is left is the "momentum

@@ -51,7 +51,10 @@ DEFAULTS: dict[str, Any] = {
     "paper_min_score": 50,  # picks at or above this are logged as paper trades
     # Simulated portfolio (starts with account_size in cash)
     "sim_min_score": 70,  # buy picks at or above this score
-    "sim_target_pct": 50.0,  # sell when the bid is this far above the entry price
+    # Sell when the bid is this far above the entry price. Raised from 50 on Nov 9, 2026: on 2,200+ journaled
+    # out-of-the-money contracts, +100% beat +50% at the same -40% stop at every holding period and in 3 of 4
+    # entry weeks (the 4th lost under every target), also with the top 1% of winners removed.
+    "sim_target_pct": 100.0,
     "sim_stop_pct": 40.0,  # sell when the bid is this far below the entry price (a backstop under structure stops)
     # "structure": the stop is the stock crossing just beyond the nearest level that proves the trade
     # wrong, and buys need that stop close (sim_max_risk_atr) with a target well beyond it
@@ -116,6 +119,18 @@ DEFAULTS: dict[str, Any] = {
         {"id": "pct_stops", "group": "rules", "name": "Percent stops (control)",
          "summary": "The old exits: -40% on the option, with no rule about distance to a stop level",
          "rules": {"sim_stop_mode": "premium"}},
+        # Filter tests turned into live paper accounts (Nov 9, 2026; filters.py). On journaled out-of-the-money
+        # contracts, a gamma backdrop in the day's top fifth cleared the adoption bar, and within scores 60-69 it
+        # averaged +$10.83 against +$0.52. Puts at score 60+ made money in all four weeks so far and calls lost,
+        # which may be one market phase: tested here, not adopted. Both buy only out of the money, without the
+        # market filter, as the journal test did.
+        {"id": "gamma_60", "group": "rules", "name": "Gamma backdrop, score 60+",
+         "summary": "Out of the money only, score 60+, and only with a gamma backdrop reading of 0.85+ (about the top fifth)",
+         "rules": {"sim_min_score": 60, "sim_min_factors": {"gamma": 0.85}, "sim_min_moneyness": 0.001,
+                   "sim_use_regime": False}},
+        {"id": "puts_60", "group": "rules", "name": "Puts only, score 60+",
+         "summary": "Out of the money puts only, score 60+: tests whether the journal's put/call gap holds",
+         "rules": {"sim_min_score": 60, "sim_types": ["put"], "sim_min_moneyness": 0.001, "sim_use_regime": False}},
         {"id": "skip_weak_sectors", "group": "rules", "name": "Skip weak sectors", "summary": "Never buys in sectors the regime says to avoid",
          "rules": {"sim_skip_avoided_sectors": True}},
         {"id": "weeklies", "group": "short", "name": "Weeklies",
