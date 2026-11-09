@@ -133,7 +133,9 @@ contracts kept, but a rule changes only once it has enough data. `filters.py` ho
 falling SPY week). Weight tuning keeps its own lock (40 sessions, about Dec 22), which the user is fine waiting for.
 Done so far: the target went from +50% to +100% (stop unchanged at -40%); Core also buys at 60-69 when the gamma
 backdrop reads 0.85+ (`sim_gamma_exception`, the user's call; "Score 70 only (control)" keeps the old rule); "Gamma backdrop, score 60+" and "Puts
-only, score 60+" run as strategy accounts. Never loosen a stop to chase a better test result.
+only, score 60+" run as strategy accounts. All accounts restarted at $1,000 on Nov 9 (`accounts_epoch`; old
+records in `paper/archive`, shown as "Previous run"); afterwards new ideas get new accounts, not restarts. The journal
+and 0DTE lab are never reset. Never loosen a stop to chase a better test result.
 
 RS ratings (Nov 2026, from a weekly 2008-26 test of today's S&P 500; details in `relstrength.py`'s docstring):
 useless for 1-3 week swings; over 3 months most of the edge is volatility, and what is left is the "momentum
