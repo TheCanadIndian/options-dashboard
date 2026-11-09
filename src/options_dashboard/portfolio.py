@@ -270,6 +270,17 @@ def market_regime(result: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]
     return {"score": score, "label": label, "reads": reads}
 
 
+def score_ok(score, gamma, cfg: dict[str, Any]):
+    """Whether a score qualifies for buying: sim_min_score, or the lower score of sim_gamma_exception when
+    the gamma backdrop reading is strong enough. Works on single values and on pandas Series."""
+    ok = score >= cfg["sim_min_score"]
+    ex = cfg.get("sim_gamma_exception")
+    if ex and gamma is not None:
+        strong = (gamma >= ex["gamma"]) if not isinstance(gamma, float) or gamma == gamma else False
+        ok = ok | ((score >= ex["min_score"]) & strong)
+    return ok
+
+
 def entry_block(row, info: dict[str, Any], regime: dict[str, Any], cfg: dict[str, Any],
                 avoided: set[str] | None = None) -> str | None:
     """Why the account would not buy this contract on its own merits, or None if it could."""
@@ -379,7 +390,7 @@ def _buy(state: dict[str, Any], result: dict[str, Any], now: str, cfg: dict[str,
     cutoff = (datetime.fromisoformat(now) - timedelta(days=cfg["sim_reentry_days"])).isoformat()
     resting = {c["ticker"] for c in state["closed"] if c["exit_time"] > cutoff}
     scored = contracts.assign(account_score=account_scores(contracts, result, cfg))
-    picks = scored[(scored["account_score"] >= cfg["sim_min_score"]) & ~scored["stale"]]
+    picks = scored[score_ok(scored["account_score"], scored.get("f_gamma"), cfg) & ~scored["stale"]]
     picks = picks.sort_values("account_score", ascending=False)
     avoided = avoided_sectors(result)
     bought = 0

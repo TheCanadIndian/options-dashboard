@@ -131,7 +131,8 @@ Changing rules (Nov 9, 2026): the user wants aggressive changes until something 
 contracts kept, but a rule changes only once it has enough data. `filters.py` holds the bar (300+ contracts,
 4+ entry weeks, ahead in 3 of 4 including the latest, +$2 a contract; one-sided filters also need a rising and a
 falling SPY week). Weight tuning keeps its own lock (40 sessions, about Dec 22), which the user is fine waiting for.
-Done so far: the target went from +50% to +100% (stop unchanged at -40%); "Gamma backdrop, score 60+" and "Puts
+Done so far: the target went from +50% to +100% (stop unchanged at -40%); Core also buys at 60-69 when the gamma
+backdrop reads 0.85+ (`sim_gamma_exception`, the user's call; "Score 70 only (control)" keeps the old rule); "Gamma backdrop, score 60+" and "Puts
 only, score 60+" run as strategy accounts. Never loosen a stop to chase a better test result.
 
 RS ratings (Nov 2026, from a weekly 2008-26 test of today's S&P 500; details in `relstrength.py`'s docstring):

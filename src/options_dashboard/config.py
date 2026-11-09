@@ -51,6 +51,10 @@ DEFAULTS: dict[str, Any] = {
     "paper_min_score": 50,  # picks at or above this are logged as paper trades
     # Simulated portfolio (starts with account_size in cash)
     "sim_min_score": 70,  # buy picks at or above this score
+    # ...or at this lower score when the gamma backdrop reading is this strong (user's call, Nov 9, 2026). In the
+    # journal, scores 60-69 with gamma in the day's top fifth averaged +$10.83 a contract against +$0.52 for the
+    # rest; "Score 70+, or 60-69 with gamma" averaged +$12.44 on 190 contracts. None turns it off.
+    "sim_gamma_exception": {"min_score": 60, "gamma": 0.85},
     # Sell when the bid is this far above the entry price. Raised from 50 on Nov 9, 2026: on 2,200+ journaled
     # out-of-the-money contracts, +100% beat +50% at the same -40% stop at every holding period and in 3 of 4
     # entry weeks (the 4th lost under every target), also with the top 1% of winners removed.
@@ -111,7 +115,10 @@ DEFAULTS: dict[str, Any] = {
         {"id": "quick_exits", "group": "rules", "name": "Quick exits", "summary": "Exits at +30% or -25%",
          "rules": {"sim_target_pct": 30.0, "sim_stop_pct": 25.0}},
         {"id": "high_conviction", "group": "rules", "name": "High conviction", "summary": "Only buys at a score of 80 or more",
-         "rules": {"sim_min_score": 80}},
+         "rules": {"sim_min_score": 80, "sim_gamma_exception": None}},
+        {"id": "score70_control", "group": "rules", "name": "Score 70 only (control)",
+         "summary": "Core's old entry rule: 70+ with no gamma exception, to measure what the exception adds",
+         "rules": {"sim_gamma_exception": None}},
         {"id": "otm", "group": "rules", "name": "Out of the money", "summary": "Only contracts at least 2% out of the money",
          "rules": {"sim_min_moneyness": 0.02}},
         {"id": "no_regime", "group": "rules", "name": "No market filter", "summary": "Ignores market direction and regime limits",

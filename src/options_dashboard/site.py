@@ -468,7 +468,10 @@ def render(state: dict[str, Any], cfg: dict[str, Any]) -> str:
         "dealer positioning (gamma walls and flip, vanna, charm, and customer delta exposure estimated from "
         "classified buy and sell flow), Wyckoff structure, volume price analysis, and trend. Bullish reads "
         "look for calls, bearish reads for puts, and mixed reads are skipped.",
-        f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100, it costs no more "
+        f"Buys one contract when the scanner scores it {cfg['sim_min_score']} or more out of 100"
+        + (f" ({cfg['sim_gamma_exception']['min_score']} or more when the gamma backdrop reads "
+           f"{cfg['sim_gamma_exception']['gamma']:g}+)" if cfg.get("sim_gamma_exception") else "")
+        + f", it costs no more "
         f"than {cfg['risk_per_trade_pct']:g}% of the account, and there is cash for it. At most "
         f"{cfg['sim_max_positions']} positions, one per stock.",
         (f"Only buys near a level that would prove the trade wrong: the stop sits just beyond the nearest "
@@ -658,7 +661,7 @@ def _buy_status(row: Any, state: dict[str, Any], cfg: dict[str, Any], resting: s
     """Why a flagged contract is or is not in the portfolio, and whether it is buy grade."""
     held = {p["symbol"] for p in state["positions"]}
     held_tickers = {p["ticker"] for p in state["positions"]}
-    grade = row["score"] >= cfg["sim_min_score"] and not row["stale"]
+    grade = bool(portfolio.score_ok(row["score"], row.get("f_gamma"), cfg)) and not row["stale"]
     if row["contractSymbol"] in held:
         return "In portfolio", grade
     if row["stale"]:
@@ -996,7 +999,9 @@ def render_scanner(result: dict[str, Any], state: dict[str, Any], cfg: dict[str,
 
     tiles = [
         ("Contracts flagged", str(len(contracts)), f"from {contracts['ticker'].nunique()} of {len(tickers)} tickers"),
-        ("Buy grade", str(buy_grade), f"score {cfg['sim_min_score']} or more with a live quote"),
+        ("Buy grade", str(buy_grade), f"score {cfg['sim_min_score']} or more"
+         + (f" ({cfg['sim_gamma_exception']['min_score']}+ with strong gamma)" if cfg.get("sim_gamma_exception") else "")
+         + " with a live quote"),
         ("Top score", f"{contracts['score'].max():.0f}" if len(contracts) else "None", "out of 100"),
         ("Max cost per contract", _money(cfg["account_size"] * cfg["risk_per_trade_pct"] / 100, False),
          f"{cfg['risk_per_trade_pct']:g}% of the account"),
