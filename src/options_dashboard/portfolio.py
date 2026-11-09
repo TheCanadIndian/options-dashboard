@@ -40,16 +40,40 @@ def _path(account: str):
     return FILE if account == "core" else ACCOUNTS_DIR / f"{account}.json"
 
 
+def _blank(cfg: dict[str, Any]) -> dict[str, Any]:
+    cash = float(cfg["account_size"])
+    return {
+        "start_cash": cash, "cash": cash,
+        "started": datetime.now().isoformat(timespec="seconds"),
+        "updated": None, "positions": [], "closed": [], "equity": [], "log": [],
+    }
+
+
 def load(cfg: dict[str, Any], account: str = "core") -> dict[str, Any]:
     try:
         return json.loads(_path(account).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        cash = float(cfg["account_size"])
-        return {
-            "start_cash": cash, "cash": cash,
-            "started": datetime.now().isoformat(timespec="seconds"),
-            "updated": None, "positions": [], "closed": [], "equity": [], "log": [],
-        }
+        return _blank(cfg)
+
+
+ARCHIVE_DIR = HOME / "paper" / "archive"
+
+
+def _restart(state: dict[str, Any], cfg: dict[str, Any], account: str, epoch: str) -> dict[str, Any]:
+    """Archive an account's record and start it again with fresh cash. Used when a shared rule changes for
+    every account at once (`accounts_epoch`), so the race compares rules from the same start with the same
+    cash. Open positions stay in the archive, valued at their last bid; they are not traded further."""
+    fresh = {**_blank(cfg), "epoch": epoch}
+    if state["closed"] or state["positions"]:
+        name = f"{'portfolio' if account == 'core' else account}-{state['started'][:10]}-to-{date.today().isoformat()}.json"
+        value = round(equity(state), 2)
+        state["archived"] = {"epoch": epoch, "at": datetime.now().isoformat(timespec="seconds"), "value": value,
+                             "note": "open positions valued at their last bid"}
+        ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        (ARCHIVE_DIR / name).write_text(json.dumps(state, indent=1), encoding="utf-8")
+        fresh["previous"] = {"started": state["started"], "ended": date.today().isoformat(), "start_cash": state["start_cash"],
+                             "value": value, "trades": len(state["closed"]), "file": name}
+    return fresh
 
 
 def _save(state: dict[str, Any], account: str = "core") -> None:
@@ -453,6 +477,9 @@ def update(result: dict[str, Any], cfg: dict[str, Any], account: str = "core") -
     state = load(cfg, account)
     if not data.market_open():
         return state  # option quotes outside the session are too wide to trade or value against
+    epoch = cfg.get("accounts_epoch")
+    if epoch and state.get("epoch") != epoch:
+        state = _restart(state, cfg, account, epoch)
     now = datetime.now().isoformat(timespec="seconds")
     _manage(state, now, cfg)
     slot = _review_due(state, cfg)

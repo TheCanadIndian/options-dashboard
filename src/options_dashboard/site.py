@@ -1803,6 +1803,11 @@ def render_strategies(cfg: dict[str, Any]) -> str:
             or "<li>The shared settings, unchanged</li>"
         open_rows = "".join(_trade(p, cfg["sim_commission"]) for p in sorted(s["positions"], key=lambda p: p["opened"], reverse=True))
         closed_rows = "".join(_trade(c, cfg["sim_commission"]) for c in reversed(s["closed"][-6:]))
+        prev = s.get("previous")
+        prev_html = (f'<p class="muted small">Previous run {_day(prev["started"])} to {_day(prev["ended"])}: '
+                     f'{_money(prev["start_cash"], False)} to {_money(prev["value"])} '
+                     f'({prev["value"] / prev["start_cash"] - 1:+.1%}) over {prev["trades"]} closed trades, under the '
+                     f'old shared rules. Archived, not deleted.</p>' if prev else "")
         cards.append(
             f'<details class="card acct" id="acct-{a["id"]}"><summary>'
             f'<span class="acct-name">{escape(a["name"])}</span>'
@@ -1810,14 +1815,17 @@ def render_strategies(cfg: dict[str, Any]) -> str:
             f'<span class="acct-sub">{escape(a["summary"])} · {len(s["positions"])} open · {len(s["closed"])} closed</span>'
             f'</summary><h4>Rule changes from the shared settings</h4><ul>{rules}</ul>'
             f'<h4>Open positions</h4>{open_rows or "<p class=muted>None</p>"}'
-            f'<h4>Latest closed trades</h4>{closed_rows or "<p class=muted>None yet</p>"}</details>')
+            f'<h4>Latest closed trades</h4>{closed_rows or "<p class=muted>None yet</p>"}{prev_html}</details>')
 
     body = f"""{_strategy_tabs("strategies.html")}<h2>Leaderboard</h2>{table}
 <h2>Value over time</h2><div class="panel">{chart}</div>
 <h2>Each strategy</h2><div class="acct-tools"><button type="button" data-acct="1">Expand all</button>
 <button type="button" data-acct="0">Collapse all</button></div><div class="cards">{"".join(cards)}</div>
 <p class="muted small">Every account starts with {_money(float(cfg["account_size"]), False)} and trades the same scans at the
-same moments, so differences come from the rules. Every account only buys to open and sells to close.</p>"""
+same moments, so differences come from the rules. Every account only buys to open and sells to close.
+{f'All accounts restarted on {_day(cfg["accounts_epoch"])} when shared rules changed for all of them at once '
+ f'(a +100% target and buying 60-69 scores with a strong gamma backdrop); each card shows its previous run, '
+ f'which is archived. New ideas get new accounts rather than another restart.' if cfg.get("accounts_epoch") else ""}</p>"""
     return _page("Strategies", "Several simulated accounts, each trying different rules on the same scans.", body,
                  TABLE_JS + MULTI_JS)
 

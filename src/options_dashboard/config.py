@@ -55,6 +55,11 @@ DEFAULTS: dict[str, Any] = {
     # journal, scores 60-69 with gamma in the day's top fifth averaged +$10.83 a contract against +$0.52 for the
     # rest; "Score 70+, or 60-69 with gamma" averaged +$12.44 on 190 contracts. None turns it off.
     "sim_gamma_exception": {"min_score": 60, "gamma": 0.85},
+    # Every account archives its record and restarts with fresh cash at its first market-hours scan after this
+    # changes (portfolio._restart). Set only when a shared rule changes for all accounts at once, as on
+    # Nov 9, 2026 (+100% target, gamma exception); a new idea gets its own account instead. One account can
+    # carry its own date in its rules (for example if it falls below the cost of one contract).
+    "accounts_epoch": "2026-11-09",
     # Sell when the bid is this far above the entry price. Raised from 50 on Nov 9, 2026: on 2,200+ journaled
     # out-of-the-money contracts, +100% beat +50% at the same -40% stop at every holding period and in 3 of 4
     # entry weeks (the 4th lost under every target), also with the top 1% of winners removed.
